@@ -1,0 +1,16 @@
+# Local competition data
+data/raw/*.csv
+data/raw/*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
