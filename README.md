@@ -1,45 +1,95 @@
 # Kaggle Playground S6E3 - Predict Customer Churn
 
-Proyecto base para participar en la competencia:
-`https://www.kaggle.com/competitions/playground-series-s6e3`
+Competencia: `https://www.kaggle.com/competitions/playground-series-s6e3`
 
 ## Objetivo
 
-Predecir la probabilidad de abandono (`Churn`) para cada `id` del set de prueba.
+Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
+
+## Estructura del proyecto
+
+```
+.
+|-- src/
+|   `-- churn_baseline/
+|       |-- config.py
+|       |-- data.py
+|       |-- modeling.py
+|       |-- evaluation.py
+|       |-- artifacts.py
+|       |-- kaggle_api.py
+|       `-- pipeline.py
+|-- scripts/
+|   |-- train_baseline.py
+|   |-- make_submission.py
+|   |-- submit_kaggle.py
+|   `-- run_baseline.py
+|-- notebooks/
+|   `-- baseline_walkthrough.ipynb
+|-- artifacts/
+|   |-- models/
+|   |-- reports/
+|   |-- submissions/
+|   `-- logs/
+|-- data/
+|   `-- raw/
+`-- docs/
+```
 
 ## Quickstart
+
+1. Descargar datos
 
 ```bash
 kaggle competitions download -c playground-series-s6e3 -p data/raw
 unzip data/raw/playground-series-s6e3.zip -d data/raw
 ```
 
-## Estructura
+2. Entrenar baseline y guardar modelo/metricas
 
-```
-.
-|-- data/
-|   `-- raw/
-|       |-- playground-series-s6e3.zip
-|       |-- sample_submission.csv
-|       |-- test.csv
-|       `-- train.csv
-`-- docs/
-    |-- competencia.md
-    |-- setup.md
-    `-- estado.md
+```bash
+python scripts/train_baseline.py
 ```
 
-## Estado inicial
+2b. Entrenar baseline con validacion robusta (Stratified K-Fold + OOF)
 
-- Repositorio remoto creado: `moffermann/kaggle-playground-s6e3-churn`
-- Datos descargados y extraidos en `data/raw/`.
+```bash
+python scripts/train_cv.py --folds 5
+```
 
-## Datos y reglas
+2c. Entrenar multi-seed sobre CV (ensemble por promedio)
 
-- Los datos de competencia no se versionan en git.
-- Antes de descargar o enviar, debes entrar a Kaggle y aceptar las reglas en `Join Competition`.
+```bash
+python scripts/train_cv_multiseed.py --folds 5 --seeds "42,2024,3407"
+```
 
-## Siguiente paso recomendado
+3. Generar submission
 
-Crear un baseline de clasificacion (por ejemplo, LightGBM o XGBoost) y subir el primer `submission.csv`.
+```bash
+python scripts/make_submission.py
+```
+
+3b. Generar submission ensemble desde modelos multi-seed
+
+```bash
+python scripts/make_submission_ensemble.py
+```
+
+4. Enviar a Kaggle (opcional)
+
+```bash
+python scripts/submit_kaggle.py --message "playground-series-s6e3"
+```
+
+## Pipeline end-to-end (una sola llamada)
+
+```bash
+python scripts/run_baseline.py --submit --message "playground-series-s6e3"
+```
+
+## Notas
+
+- `scripts/` contiene solo CLIs con argumentos.
+- La logica de negocio vive en `src/churn_baseline/`.
+- `artifacts/` guarda salidas locales y no se versiona (solo estructura).
+- Antes de descargar/enviar, debes aceptar reglas en `Join Competition`.

@@ -1,6 +1,8 @@
 # Local competition data
 data/raw/*.csv
 data/raw/*.zip
+data/submissions/*.csv
+catboost_info/
 
 # Python
 __pycache__/
@@ -14,3 +16,14 @@ venv/
 # Notebook checkpoints
 .ipynb_checkpoints/
 
+# Artifacts (keep folder structure only)
+artifacts/**
+!artifacts/README.md
+!artifacts/models/
+!artifacts/models/.gitkeep
+!artifacts/reports/
+!artifacts/reports/.gitkeep
+!artifacts/submissions/
+!artifacts/submissions/.gitkeep
+!artifacts/logs/
+!artifacts/logs/.gitkeep
