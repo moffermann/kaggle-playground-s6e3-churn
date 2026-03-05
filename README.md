@@ -63,6 +63,12 @@ python scripts/train_cv.py --folds 5
 python scripts/train_cv_multiseed.py --folds 5 --seeds "42,2024,3407"
 ```
 
+2d. Ejecutar experimento de feature engineering por bloques (A/B/C)
+
+```bash
+python scripts/experiment_features.py --feature-blocks "A"
+```
+
 3. Generar submission
 
 ```bash
