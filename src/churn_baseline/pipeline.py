@@ -16,6 +16,7 @@ from .data import (
     prepare_train_features,
 )
 from .evaluation import binary_auc
+from .feature_engineering import normalize_feature_blocks
 from .modeling import (
     best_iteration_or_default,
     fit_full_train,
@@ -35,10 +36,12 @@ def train_baseline(
     random_state: int,
     early_stopping_rounds: int,
     verbose: int,
+    feature_blocks: Sequence[str] | None = None,
 ) -> Dict[str, Any]:
     """Train holdout+full baseline and save model + metrics."""
     train_df = load_csv(train_csv_path)
-    x, y = prepare_train_features(train_df, drop_id=True)
+    normalized_blocks = normalize_feature_blocks(feature_blocks)
+    x, y = prepare_train_features(train_df, drop_id=True, feature_blocks=normalized_blocks)
     cat_columns = infer_categorical_columns(x)
 
     x_train, x_valid, y_train, y_valid = train_test_split(
@@ -86,6 +89,7 @@ def train_baseline(
     metrics: Dict[str, Any] = {
         "train_rows": int(len(train_df)),
         "feature_count": int(x.shape[1]),
+        "feature_blocks": list(normalized_blocks),
         "categorical_columns": cat_columns,
         "holdout_auc": holdout_auc,
         "holdout_best_iteration": int(holdout_model.get_best_iteration()),
@@ -188,13 +192,15 @@ def train_baseline_cv(
     random_state: int,
     early_stopping_rounds: int,
     verbose: int,
+    feature_blocks: Sequence[str] | None = None,
 ) -> Dict[str, Any]:
     """Train baseline with Stratified K-Fold CV, generate OOF and fit final model."""
     if folds < 2:
         raise ValueError("folds must be >= 2")
 
     train_df = load_csv(train_csv_path)
-    x, y = prepare_train_features(train_df, drop_id=True)
+    normalized_blocks = normalize_feature_blocks(feature_blocks)
+    x, y = prepare_train_features(train_df, drop_id=True, feature_blocks=normalized_blocks)
     cat_columns = infer_categorical_columns(x)
 
     seed_run = _run_cv_for_seed(
@@ -248,6 +254,7 @@ def train_baseline_cv(
     metrics: Dict[str, Any] = {
         "train_rows": int(len(train_df)),
         "feature_count": int(x.shape[1]),
+        "feature_blocks": list(normalized_blocks),
         "categorical_columns": cat_columns,
         "cv_folds": int(folds),
         "cv_fold_metrics": fold_rows,
@@ -277,6 +284,7 @@ def train_baseline_cv_multiseed(
     seeds: Sequence[int],
     early_stopping_rounds: int,
     verbose: int,
+    feature_blocks: Sequence[str] | None = None,
 ) -> Dict[str, Any]:
     """Train CV baseline across multiple seeds and average OOF predictions."""
     if folds < 2:
@@ -289,7 +297,8 @@ def train_baseline_cv_multiseed(
         raise ValueError("seeds contain duplicates")
 
     train_df = load_csv(train_csv_path)
-    x, y = prepare_train_features(train_df, drop_id=True)
+    normalized_blocks = normalize_feature_blocks(feature_blocks)
+    x, y = prepare_train_features(train_df, drop_id=True, feature_blocks=normalized_blocks)
     cat_columns = infer_categorical_columns(x)
 
     models_out_dir = Path(models_dir)
@@ -370,6 +379,7 @@ def train_baseline_cv_multiseed(
     metrics: Dict[str, Any] = {
         "train_rows": int(len(train_df)),
         "feature_count": int(x.shape[1]),
+        "feature_blocks": list(normalized_blocks),
         "categorical_columns": cat_columns,
         "cv_folds": int(folds),
         "seeds": normalized_seeds,
@@ -394,6 +404,7 @@ def make_submission(
     model_path: str | Path,
     test_csv_path: str | Path,
     output_csv_path: str | Path,
+    feature_blocks: Sequence[str] | None = None,
 ) -> Dict[str, Any]:
     """Generate submission CSV using a trained model."""
     test_df = load_csv(test_csv_path)
@@ -401,7 +412,8 @@ def make_submission(
         raise ValueError(f"Column '{ID_COLUMN}' not found in test CSV")
 
     ids = test_df[ID_COLUMN].copy()
-    x_test = prepare_test_features(test_df, drop_id=True)
+    normalized_blocks = normalize_feature_blocks(feature_blocks)
+    x_test = prepare_test_features(test_df, drop_id=True, feature_blocks=normalized_blocks)
     model = load_model(model_path)
     predictions = predict_proba(model, x_test)
 
@@ -413,6 +425,7 @@ def make_submission(
     return {
         "output_csv": str(out_path),
         "rows": int(len(submission)),
+        "feature_blocks": list(normalized_blocks),
         "prediction_min": float(submission[TARGET_COLUMN].min()),
         "prediction_max": float(submission[TARGET_COLUMN].max()),
     }
@@ -422,6 +435,7 @@ def make_submission_ensemble(
     model_paths: Sequence[str | Path],
     test_csv_path: str | Path,
     output_csv_path: str | Path,
+    feature_blocks: Sequence[str] | None = None,
 ) -> Dict[str, Any]:
     """Generate submission CSV by averaging predictions from multiple models."""
     if not model_paths:
@@ -432,7 +446,8 @@ def make_submission_ensemble(
         raise ValueError(f"Column '{ID_COLUMN}' not found in test CSV")
 
     ids = test_df[ID_COLUMN].copy()
-    x_test = prepare_test_features(test_df, drop_id=True)
+    normalized_blocks = normalize_feature_blocks(feature_blocks)
+    x_test = prepare_test_features(test_df, drop_id=True, feature_blocks=normalized_blocks)
 
     predictions_matrix = []
     for model_path in model_paths:
@@ -450,6 +465,7 @@ def make_submission_ensemble(
         "output_csv": str(out_path),
         "rows": int(len(submission)),
         "model_count": int(len(model_paths)),
+        "feature_blocks": list(normalized_blocks),
         "prediction_min": float(submission[TARGET_COLUMN].min()),
         "prediction_max": float(submission[TARGET_COLUMN].max()),
     }
