@@ -63,11 +63,15 @@ python scripts/train_cv.py --folds 5
 python scripts/train_cv_multiseed.py --folds 5 --seeds "42,2024,3407"
 ```
 
-2d. Ejecutar experimento de feature engineering por bloques (A/B/C)
+2d. Ejecutar experimento de feature engineering por bloques (A/B/C/O/P)
 
 ```bash
 python scripts/experiment_features.py --feature-blocks "A"
 ```
+
+Bloques relevantes para outliers:
+- `O`: banderas `is_outlier_*` + `outlier_flag_count` usando umbrales p01/p99.
+- `P`: features continuas recortadas p01/p99 (`pclip_*`) para mitigacion de colas.
 
 3. Generar submission
 
