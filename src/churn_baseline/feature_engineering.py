@@ -12,7 +12,28 @@ import pandas as pd
 BLOCK_A: Final[str] = "A"
 BLOCK_B: Final[str] = "B"
 BLOCK_C: Final[str] = "C"
-SUPPORTED_BLOCKS: Final[tuple[str, ...]] = (BLOCK_A, BLOCK_B, BLOCK_C)
+BLOCK_O: Final[str] = "O"
+BLOCK_P: Final[str] = "P"
+SUPPORTED_BLOCKS: Final[tuple[str, ...]] = (BLOCK_A, BLOCK_B, BLOCK_C, BLOCK_O, BLOCK_P)
+
+# p01/p99 thresholds estimated from train.csv during outlier audit.
+OUTLIER_FLAG_BOUNDS_P01_P99: Final[dict[str, tuple[float, float]]] = {
+    "MonthlyCharges": (19.3, 115.5),
+    "TotalCharges": (33.9, 8240.85),
+    "monthly_per_tenure": (0.278472, 80.15),
+    "total_per_tenure": (17.983333, 116.734722),
+    "total_minus_monthly_tenure": (-911.064, 789.9035),
+}
+BLOCK_ALIASES: Final[dict[str, str]] = {
+    "OUTLIER": BLOCK_O,
+    "OUTLIERS": BLOCK_O,
+    "OUTLIER_FLAGS": BLOCK_O,
+    "FLAGS": BLOCK_O,
+    "PCLIP": BLOCK_P,
+    "CLIP": BLOCK_P,
+    "CLIPPING": BLOCK_P,
+    "PERCENTILE_CLIP": BLOCK_P,
+}
 
 
 def normalize_feature_blocks(feature_blocks: Sequence[str] | None) -> tuple[str, ...]:
@@ -24,6 +45,7 @@ def normalize_feature_blocks(feature_blocks: Sequence[str] | None) -> tuple[str,
     seen = set()
     for value in feature_blocks:
         block = str(value).strip().upper()
+        block = BLOCK_ALIASES.get(block, block)
         if not block:
             continue
         if block not in SUPPORTED_BLOCKS:
@@ -50,6 +72,12 @@ def apply_feature_engineering(
             continue
         if block == BLOCK_C:
             out = _apply_block_c(out)
+            continue
+        if block == BLOCK_O:
+            out = _apply_block_o(out)
+            continue
+        if block == BLOCK_P:
+            out = _apply_block_p(out)
             continue
     return out
 
@@ -121,3 +149,79 @@ def _apply_block_c(frame: pd.DataFrame) -> pd.DataFrame:
         out["TechSupport"].astype(str) + "__" + out["OnlineSecurity"].astype(str)
     )
     return out
+
+
+def _apply_block_o(frame: pd.DataFrame) -> pd.DataFrame:
+    _require_columns(frame, ("tenure", "MonthlyCharges", "TotalCharges"), block=BLOCK_O)
+    out = frame.copy()
+
+    numeric = _build_outlier_numeric_features(out)
+    outlier_flag_columns = _apply_bounds(
+        out=out,
+        numeric=numeric,
+        bounds=OUTLIER_FLAG_BOUNDS_P01_P99,
+        prefix="is_outlier_",
+        clip=False,
+    )
+
+    out["outlier_flag_count"] = out[outlier_flag_columns].sum(axis=1).astype("int8")
+    return out
+
+
+def _apply_block_p(frame: pd.DataFrame) -> pd.DataFrame:
+    _require_columns(frame, ("tenure", "MonthlyCharges", "TotalCharges"), block=BLOCK_P)
+    out = frame.copy()
+
+    numeric = _build_outlier_numeric_features(out)
+    clipped_columns = _apply_bounds(
+        out=out,
+        numeric=numeric,
+        bounds=OUTLIER_FLAG_BOUNDS_P01_P99,
+        prefix="pclip_",
+        clip=True,
+    )
+
+    clipped_values = out[clipped_columns]
+    out["pclip_sum"] = clipped_values.sum(axis=1)
+    return out
+
+
+def _build_outlier_numeric_features(frame: pd.DataFrame) -> dict[str, pd.Series]:
+    tenure_values = pd.to_numeric(frame["tenure"], errors="coerce")
+    tenure_safe = tenure_values.clip(lower=1).fillna(1.0)
+    monthly_charges = pd.to_numeric(frame["MonthlyCharges"], errors="coerce").fillna(0.0)
+    total_charges = pd.to_numeric(frame["TotalCharges"], errors="coerce").fillna(0.0)
+
+    return {
+        "MonthlyCharges": monthly_charges,
+        "TotalCharges": total_charges,
+        "monthly_per_tenure": monthly_charges / tenure_safe,
+        "total_per_tenure": total_charges / tenure_safe,
+        "total_minus_monthly_tenure": total_charges - (monthly_charges * tenure_safe),
+    }
+
+
+def _apply_bounds(
+    out: pd.DataFrame,
+    numeric: dict[str, pd.Series],
+    bounds: dict[str, tuple[float, float]],
+    prefix: str,
+    clip: bool,
+) -> list[str]:
+    missing_features = [feature_name for feature_name in bounds if feature_name not in numeric]
+    if missing_features:
+        raise ValueError(
+            "Outlier bounds reference features missing from computed numeric set: "
+            f"{missing_features}"
+        )
+
+    columns = []
+    for feature_name, (lower_bound, upper_bound) in bounds.items():
+        values = numeric[feature_name]
+        column_name = f"{prefix}{feature_name}"
+        if clip:
+            out[column_name] = values.clip(lower=lower_bound, upper=upper_bound)
+        else:
+            out[column_name] = ((values < lower_bound) | (values > upper_bound)).astype("int8")
+        columns.append(column_name)
+    return columns

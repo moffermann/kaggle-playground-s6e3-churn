@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--feature-blocks",
         default="A",
-        help="Comma-separated feature blocks to enable (supported: A,B,C). Use 'none' for baseline.",
+        help="Comma-separated feature blocks to enable (supported: A,B,C,O,P). Use 'none' for baseline.",
     )
     parser.add_argument(
         "--model-path",
