@@ -23,12 +23,14 @@ def fit_with_validation(
     params: CatBoostHyperParams,
     early_stopping_rounds: int,
     verbose: int,
+    sample_weight: Optional[pd.Series] = None,
 ) -> CatBoostClassifier:
     """Train CatBoost with validation and early stopping."""
     model = build_model(params)
     model.fit(
         x_train,
         y_train,
+        sample_weight=sample_weight,
         cat_features=cat_columns,
         eval_set=(x_valid, y_valid),
         use_best_model=True,
@@ -44,12 +46,14 @@ def fit_full_train(
     cat_columns: List[str],
     params: CatBoostHyperParams,
     verbose: int,
+    sample_weight: Optional[pd.Series] = None,
 ) -> CatBoostClassifier:
     """Train CatBoost on the full train split without eval set."""
     model = build_model(params)
     model.fit(
         x_train,
         y_train,
+        sample_weight=sample_weight,
         cat_features=cat_columns,
         verbose=verbose,
     )

@@ -73,6 +73,42 @@ Bloques relevantes para outliers:
 - `O`: banderas `is_outlier_*` + `outlier_flag_count` usando umbrales p01/p99.
 - `P`: features continuas recortadas p01/p99 (`pclip_*`) para mitigacion de colas.
 
+2e. Ejecutar experimento DA R1 (segment representation fold-safe)
+
+```bash
+python scripts/experiment_da_r1.py --base-feature-blocks "none"
+```
+
+2f. Ejecutar experimento DA R2 (R1 + rare bucketing + frecuencias)
+
+```bash
+python scripts/experiment_da_r1.py --representation-mode r2 --base-feature-blocks "none"
+```
+
+2g. Ejecutar DA con reweighting por rareza de segmento (fold-safe)
+
+```bash
+python scripts/experiment_da_r1.py --representation-mode r2 --base-feature-blocks "none" --enable-segment-reweighting
+```
+
+2h. Ejecutar DA sintética conservadora (oversampling in-fold de segmentos raros)
+
+```bash
+python scripts/experiment_da_r1.py --representation-mode r2 --base-feature-blocks "none" --enable-segment-oversampling --oversample-max-multiplier 1.5 --oversample-max-added-rate 0.02
+```
+
+2i. Ejecutar oversampling calibrado por objetivo de varianza (sin adivinar fuerza)
+
+```bash
+python scripts/experiment_da_r1.py --representation-mode r2 --base-feature-blocks "none" --enable-segment-oversampling --oversample-policy variance_target --oversample-se-target 0.0125 --oversample-max-added-rate 0.02
+```
+
+2j. Calcular plan de oversampling (sin entrenar) para una grilla de `SE`
+
+```bash
+python scripts/experiment_da_r1.py --representation-mode r2 --base-feature-blocks "none" --enable-segment-oversampling --oversample-policy variance_target --oversample-plan-only --oversample-plan-se-grid "0.02,0.015,0.0125,0.01,0.009,0.008"
+```
+
 3. Generar submission
 
 ```bash
