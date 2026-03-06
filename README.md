@@ -24,10 +24,12 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |-- scripts/
 |   |-- analyze_oof_models.py
 |   |-- blend_oof.py
+|   |-- stack_oof.py
 |   |-- train_baseline.py
 |   |-- train_cv_lightgbm.py
 |   |-- train_cv_xgboost.py
 |   |-- make_submission.py
+|   |-- make_submission_blend.py
 |   |-- submit_kaggle.py
 |   `-- run_baseline.py
 |-- notebooks/
@@ -103,6 +105,12 @@ python scripts/analyze_oof_models.py --oof cb=artifacts/reports/train_cv_multise
 python scripts/blend_oof.py --oof cb=artifacts/reports/train_cv_multiseed_full_hiiter_oof.csv#oof_ensemble --oof lgb=artifacts/reports/train_lightgbm_cv_oof.csv --oof xgb=artifacts/reports/train_xgboost_cv_oof.csv --method coordinate
 ```
 
+2i. Evaluar stacking lineal cross-fitted sobre OOF
+
+```bash
+python scripts/stack_oof.py --oof cb=artifacts/reports/train_cv_multiseed_full_hiiter_oof.csv#oof_ensemble --oof lgb=artifacts/reports/train_lightgbm_cv_oof.csv --oof xgb=artifacts/reports/train_xgboost_cv_oof.csv --stacker logistic
+```
+
 3. Generar submission
 
 ```bash
@@ -113,6 +121,12 @@ python scripts/make_submission.py
 
 ```bash
 python scripts/make_submission_ensemble.py
+```
+
+3c. Generar submission blend (CatBoost + LightGBM + XGBoost)
+
+```bash
+python scripts/make_submission_blend.py --weights-json-path artifacts/reports/model_diversity_blend_3model_full_grid002.json
 ```
 
 4. Enviar a Kaggle (opcional)

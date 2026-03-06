@@ -8,6 +8,8 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
+from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.model_selection import StratifiedKFold
 
 from .config import ID_COLUMN
 from .evaluation import binary_auc
@@ -308,6 +310,109 @@ def optimize_blend_coordinate_descent(
         "auc": float(best_auc),
         "rounds_used": int(rounds_used),
         "weights": {model_columns[idx]: float(weights[idx]) for idx in range(n_models)},
+    }
+
+
+def stack_oof_cross_fitted(
+    merged: pd.DataFrame,
+    model_columns: list[str],
+    *,
+    stacker: str = "logistic",
+    folds: int = 5,
+    random_state: int = 42,
+    logistic_c: float = 1.0,
+    logistic_max_iter: int = 2000,
+    ridge_alpha: float = 1.0,
+    target_column: str = OOF_TARGET_COLUMN,
+) -> dict[str, object]:
+    """Build cross-fitted stacker predictions from OOF model columns."""
+    if len(model_columns) < 2:
+        raise ValueError("Stacking requires at least 2 base models.")
+    if folds < 2:
+        raise ValueError("folds must be >= 2")
+
+    normalized_stacker = str(stacker).strip().lower()
+    if normalized_stacker not in {"logistic", "ridge"}:
+        raise ValueError("stacker must be one of: logistic, ridge")
+
+    x = merged[model_columns].to_numpy(dtype="float64")
+    y = merged[target_column].astype(int).to_numpy()
+    splitter = StratifiedKFold(n_splits=int(folds), shuffle=True, random_state=int(random_state))
+
+    oof_stack = np.zeros(shape=len(merged), dtype="float64")
+    fold_rows: list[dict[str, object]] = []
+
+    def _fit_stacker(x_fit: np.ndarray, y_fit: np.ndarray):
+        if normalized_stacker == "logistic":
+            model = LogisticRegression(
+                C=float(logistic_c),
+                solver="lbfgs",
+                max_iter=int(logistic_max_iter),
+            )
+        else:
+            model = Ridge(
+                alpha=float(ridge_alpha),
+                random_state=int(random_state),
+            )
+        model.fit(x_fit, y_fit)
+        return model
+
+    for fold_number, (train_idx, valid_idx) in enumerate(splitter.split(x, y), start=1):
+        model = _fit_stacker(x[train_idx], y[train_idx])
+
+        if normalized_stacker == "logistic":
+            pred_valid = model.predict_proba(x[valid_idx])[:, 1]
+            coefficients = model.coef_[0].tolist()
+            intercept = float(model.intercept_[0])
+        else:
+            pred_valid = np.clip(model.predict(x[valid_idx]), a_min=0.0, a_max=1.0)
+            coefficients = model.coef_.tolist()
+            intercept = float(model.intercept_)
+
+        oof_stack[valid_idx] = pred_valid
+        fold_auc = binary_auc(y[valid_idx], pred_valid)
+        fold_rows.append(
+            {
+                "fold": int(fold_number),
+                "valid_rows": int(len(valid_idx)),
+                "auc": float(fold_auc),
+                "stacker": normalized_stacker,
+                "intercept": intercept,
+                "coefficients": {
+                    model_columns[idx]: float(coefficients[idx]) for idx in range(len(model_columns))
+                },
+            }
+        )
+
+    oof_auc = binary_auc(y, oof_stack)
+    fold_aucs = [float(row["auc"]) for row in fold_rows]
+
+    full_model = _fit_stacker(x, y)
+    if normalized_stacker == "logistic":
+        full_coef = full_model.coef_[0].tolist()
+        full_intercept = float(full_model.intercept_[0])
+    else:
+        full_coef = full_model.coef_.tolist()
+        full_intercept = float(full_model.intercept_)
+
+    return {
+        "stacker": normalized_stacker,
+        "oof_pred": oof_stack,
+        "oof_auc": float(oof_auc),
+        "cv_mean_auc": float(np.mean(fold_aucs)),
+        "cv_std_auc": float(np.std(fold_aucs)),
+        "cv_fold_metrics": fold_rows,
+        "full_intercept": full_intercept,
+        "full_coefficients": {
+            model_columns[idx]: float(full_coef[idx]) for idx in range(len(model_columns))
+        },
+        "params": {
+            "folds": int(folds),
+            "random_state": int(random_state),
+            "logistic_c": float(logistic_c),
+            "logistic_max_iter": int(logistic_max_iter),
+            "ridge_alpha": float(ridge_alpha),
+        },
     }
 
 
