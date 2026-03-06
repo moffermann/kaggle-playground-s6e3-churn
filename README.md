@@ -24,6 +24,7 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |   |-- audit_submission_parity.py
 |   |-- analyze_train_test_drift.py
 |   |-- evaluate_ensemble_robustness.py
+|   |-- gate_submission_candidate.py
 |   |-- snapshot_submission_artifacts.py
 |   |-- train_baseline.py
 |   |-- make_submission.py
@@ -112,6 +113,12 @@ python scripts/analyze_train_test_drift.py --feature-blocks none --adv-folds 3 -
 
 ```bash
 python scripts/evaluate_ensemble_robustness.py --oof cb=artifacts/reports/train_cv_multiseed_full_hiiter_oof.csv#oof_ensemble --oof lgb=artifacts/reports/train_lightgbm_cv_full_hiiter_oof.csv#oof_pred --oof xgb=artifacts/reports/train_xgboost_cv_full_hiiter_oof.csv#oof_pred --repeats 3 --folds 5
+```
+
+3g. Aplicar gate automatico GO/NO_GO para decidir submission
+
+```bash
+python scripts/gate_submission_candidate.py --candidate-name playground-series-s6e3 --parity-json artifacts/reports/diagnostic_submission_parity_issue5.json --drift-json artifacts/reports/diagnostic_train_test_drift_issue5.json --robustness-json artifacts/reports/diagnostic_ensemble_robustness_issue5.json
 ```
 
 4. Enviar a Kaggle (opcional)
