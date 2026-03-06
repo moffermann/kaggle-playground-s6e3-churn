@@ -9,6 +9,7 @@ from _bootstrap import add_src_to_path
 add_src_to_path()
 
 from churn_baseline.config import CatBoostHyperParams
+from churn_baseline.feature_engineering import normalize_feature_blocks
 from churn_baseline.pipeline import train_baseline_cv_multiseed
 
 
@@ -17,6 +18,14 @@ def _parse_seeds(raw: str) -> list[int]:
     if not tokens:
         raise ValueError("At least one seed is required")
     return [int(token) for token in tokens]
+
+
+def _parse_feature_blocks(raw: str) -> list[str]:
+    normalized_raw = raw.strip().lower()
+    if normalized_raw in {"none", "off", "baseline", ""}:
+        return []
+    tokens = [token.strip() for token in raw.split(",") if token.strip()]
+    return list(normalize_feature_blocks(tokens))
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,6 +52,11 @@ def parse_args() -> argparse.Namespace:
         default="42,2024,3407",
         help="Comma-separated list of integer seeds",
     )
+    parser.add_argument(
+        "--feature-blocks",
+        default="none",
+        help="Optional feature blocks (A,B,C,O,P) or none.",
+    )
     parser.add_argument("--iterations", type=int, default=2200, help="Max boosting rounds")
     parser.add_argument("--learning-rate", type=float, default=0.05, help="Learning rate")
     parser.add_argument("--depth", type=int, default=6, help="Tree depth")
@@ -60,6 +74,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     seeds = _parse_seeds(args.seeds)
+    feature_blocks = _parse_feature_blocks(args.feature_blocks)
     params = CatBoostHyperParams(
         iterations=args.iterations,
         learning_rate=args.learning_rate,
@@ -78,6 +93,7 @@ def main() -> int:
         seeds=seeds,
         early_stopping_rounds=args.early_stopping_rounds,
         verbose=args.verbose,
+        feature_blocks=feature_blocks,
     )
     print(json.dumps(metrics, indent=2))
     return 0
