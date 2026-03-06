@@ -14,13 +14,19 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |   `-- churn_baseline/
 |       |-- config.py
 |       |-- data.py
+|       |-- encoded_features.py
 |       |-- modeling.py
+|       |-- oof_tools.py
 |       |-- evaluation.py
 |       |-- artifacts.py
 |       |-- kaggle_api.py
 |       `-- pipeline.py
 |-- scripts/
+|   |-- analyze_oof_models.py
+|   |-- blend_oof.py
 |   |-- train_baseline.py
+|   |-- train_cv_lightgbm.py
+|   |-- train_cv_xgboost.py
 |   |-- make_submission.py
 |   |-- submit_kaggle.py
 |   `-- run_baseline.py
@@ -72,6 +78,30 @@ python scripts/experiment_features.py --feature-blocks "A"
 Bloques relevantes para outliers:
 - `O`: banderas `is_outlier_*` + `outlier_flag_count` usando umbrales p01/p99.
 - `P`: features continuas recortadas p01/p99 (`pclip_*`) para mitigacion de colas.
+
+2e. Entrenar baseline CV con LightGBM (OOF + modelo final)
+
+```bash
+python scripts/train_cv_lightgbm.py --folds 5
+```
+
+2f. Entrenar baseline CV con XGBoost (OOF + modelo final)
+
+```bash
+python scripts/train_cv_xgboost.py --folds 5
+```
+
+2g. Analizar OOFs de modelos para diversidad/correlacion
+
+```bash
+python scripts/analyze_oof_models.py --oof cb=artifacts/reports/train_cv_multiseed_full_hiiter_oof.csv#oof_ensemble --oof lgb=artifacts/reports/train_lightgbm_cv_oof.csv
+```
+
+2h. Optimizar blend sobre OOF (coordinate descent)
+
+```bash
+python scripts/blend_oof.py --oof cb=artifacts/reports/train_cv_multiseed_full_hiiter_oof.csv#oof_ensemble --oof lgb=artifacts/reports/train_lightgbm_cv_oof.csv --oof xgb=artifacts/reports/train_xgboost_cv_oof.csv --method coordinate
+```
 
 3. Generar submission
 
