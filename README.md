@@ -14,12 +14,17 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |   `-- churn_baseline/
 |       |-- config.py
 |       |-- data.py
+|       |-- diagnostics.py
 |       |-- modeling.py
 |       |-- evaluation.py
 |       |-- artifacts.py
 |       |-- kaggle_api.py
 |       `-- pipeline.py
 |-- scripts/
+|   |-- audit_submission_parity.py
+|   |-- analyze_train_test_drift.py
+|   |-- evaluate_ensemble_robustness.py
+|   |-- snapshot_submission_artifacts.py
 |   |-- train_baseline.py
 |   |-- make_submission.py
 |   |-- submit_kaggle.py
@@ -83,6 +88,30 @@ python scripts/make_submission.py
 
 ```bash
 python scripts/make_submission_ensemble.py
+```
+
+3c. Auditar paridad train/inferencia para una submission candidata
+
+```bash
+python scripts/audit_submission_parity.py --metrics-path artifacts/reports/train_cv_multiseed_metrics.json --submission-csv artifacts/submissions/playground-series-s6e3.csv
+```
+
+3d. Capturar snapshot reproducible de artefactos de submission
+
+```bash
+python scripts/snapshot_submission_artifacts.py --metrics-path artifacts/reports/train_cv_multiseed_metrics.json --submission-csv artifacts/submissions/playground-series-s6e3.csv --label "pre-submit-check"
+```
+
+3e. Analizar drift train/test y adversarial validation
+
+```bash
+python scripts/analyze_train_test_drift.py --feature-blocks none --adv-folds 3 --adv-sample-frac 0.35
+```
+
+3f. Medir robustez de ensemble (equal/rank/weighted) con validacion repetida
+
+```bash
+python scripts/evaluate_ensemble_robustness.py --oof cb=artifacts/reports/train_cv_multiseed_full_hiiter_oof.csv#oof_ensemble --oof lgb=artifacts/reports/train_lightgbm_cv_full_hiiter_oof.csv#oof_pred --oof xgb=artifacts/reports/train_xgboost_cv_full_hiiter_oof.csv#oof_pred --repeats 3 --folds 5
 ```
 
 4. Enviar a Kaggle (opcional)
