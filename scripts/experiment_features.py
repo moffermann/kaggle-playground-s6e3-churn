@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--feature-blocks",
         default="A",
-        help="Comma-separated feature blocks to enable (supported: A,B,C,O,P). Use 'none' for baseline.",
+        help="Comma-separated feature blocks to enable (supported: A,B,C,G,H,R,S,V,O,P). Use 'none' for baseline.",
     )
     parser.add_argument(
         "--model-path",
@@ -66,6 +66,12 @@ def parse_args() -> argparse.Namespace:
         help="JSON path with incumbent metric (ensemble_oof_auc/oof_auc/holdout_auc)",
     )
     parser.add_argument("--folds", type=int, default=5, help="Number of Stratified K folds")
+    parser.add_argument(
+        "--stratify-mode",
+        choices=("target", "composite"),
+        default="target",
+        help="CV stratification: target only, or target plus family fallback.",
+    )
     parser.add_argument("--random-state", type=int, default=42, help="Random seed")
     parser.add_argument("--iterations", type=int, default=2200, help="Max boosting rounds")
     parser.add_argument("--learning-rate", type=float, default=0.05, help="Learning rate")
@@ -103,6 +109,7 @@ def main() -> int:
         early_stopping_rounds=args.early_stopping_rounds,
         verbose=args.verbose,
         feature_blocks=feature_blocks,
+        stratify_mode=args.stratify_mode,
     )
 
     baseline_auc, baseline_key = _load_baseline_auc(args.baseline_metrics_path)

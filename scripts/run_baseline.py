@@ -10,6 +10,7 @@ from _bootstrap import add_src_to_path
 add_src_to_path()
 
 from churn_baseline.config import CatBoostHyperParams
+from churn_baseline.feature_engineering import normalize_feature_blocks
 from churn_baseline.kaggle_api import submit_file
 from churn_baseline.pipeline import make_submission, train_baseline
 
@@ -23,6 +24,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-csv", default="artifacts/submissions/playground-series-s6e3.csv")
     parser.add_argument("--valid-size", type=float, default=0.2)
     parser.add_argument("--random-state", type=int, default=42)
+    parser.add_argument(
+        "--feature-blocks",
+        default="none",
+        help="Optional feature blocks (A,B,C,G,H,R,S,V,O,P) or none.",
+    )
+    parser.add_argument(
+        "--stratify-mode",
+        choices=("target", "composite"),
+        default="target",
+        help="Holdout stratification: target only, or target plus family fallback.",
+    )
     parser.add_argument("--iterations", type=int, default=2200)
     parser.add_argument("--learning-rate", type=float, default=0.05)
     parser.add_argument("--depth", type=int, default=6)
@@ -35,8 +47,17 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _parse_feature_blocks(raw: str) -> list[str]:
+    normalized_raw = raw.strip().lower()
+    if normalized_raw in {"none", "off", "baseline", ""}:
+        return []
+    tokens = [token.strip() for token in raw.split(",") if token.strip()]
+    return list(normalize_feature_blocks(tokens))
+
+
 def main() -> int:
     args = parse_args()
+    feature_blocks = _parse_feature_blocks(args.feature_blocks)
     params = CatBoostHyperParams(
         iterations=args.iterations,
         learning_rate=args.learning_rate,
@@ -54,11 +75,15 @@ def main() -> int:
         random_state=args.random_state,
         early_stopping_rounds=args.early_stopping_rounds,
         verbose=args.verbose,
+        feature_blocks=feature_blocks,
+        stratify_mode=args.stratify_mode,
     )
     submission_result = make_submission(
         model_path=args.model_path,
         test_csv_path=args.test_csv,
         output_csv_path=args.output_csv,
+        feature_blocks=feature_blocks,
+        train_csv_path=args.train_csv,
     )
 
     result = {

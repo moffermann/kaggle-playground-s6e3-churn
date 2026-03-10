@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--feature-blocks",
         default="none",
-        help="Optional feature blocks (A,B,C,O,P) or none.",
+        help="Optional feature blocks (A,B,C,H,R,S,V,O,P) or none.",
     )
     parser.add_argument(
         "--metrics-path",

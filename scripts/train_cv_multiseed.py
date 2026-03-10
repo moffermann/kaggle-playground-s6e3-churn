@@ -55,7 +55,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--feature-blocks",
         default="none",
-        help="Optional feature blocks (A,B,C,O,P) or none.",
+        help="Optional feature blocks (A,B,C,G,H,R,S,V,O,P) or none.",
+    )
+    parser.add_argument(
+        "--stratify-mode",
+        choices=("target", "composite"),
+        default="target",
+        help="CV stratification: target only, or target plus family fallback.",
     )
     parser.add_argument("--iterations", type=int, default=2200, help="Max boosting rounds")
     parser.add_argument("--learning-rate", type=float, default=0.05, help="Learning rate")
@@ -94,6 +100,7 @@ def main() -> int:
         early_stopping_rounds=args.early_stopping_rounds,
         verbose=args.verbose,
         feature_blocks=feature_blocks,
+        stratify_mode=args.stratify_mode,
     )
     print(json.dumps(metrics, indent=2))
     return 0
