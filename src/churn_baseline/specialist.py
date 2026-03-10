@@ -31,11 +31,17 @@ LONG_FIBER_ANY = "long_fiber_any"
 MANUAL_NO_INTERNET = "manual_no_internet"
 ONE_YEAR_FIBER_ANY = "one_year_fiber_any"
 ONE_YEAR_DSL_ANY = "one_year_dsl_any"
+ONE_YEAR_DSL_PAPERLESS_49PLUS = "one_year_dsl_paperless_49plus"
 TWO_YEAR_FIBER_ANY = "two_year_fiber_any"
+TWO_YEAR_DSL_PAPERLESS_49PLUS = "two_year_dsl_paperless_49plus"
 ONE_YEAR_FIBER_PAPERLESS_49PLUS = "one_year_fiber_paperless_49plus"
+ONE_YEAR_FIBER_PAPERLESS_25_48 = "one_year_fiber_paperless_25_48"
 TWO_YEAR_FIBER_PAPERLESS_49PLUS = "two_year_fiber_paperless_49plus"
+TWO_YEAR_FIBER_NOPAPERLESS_49PLUS = "two_year_fiber_nopaperless_49plus"
 MTM_DSL_PAPERLESS_25_48_MANUAL = "mtm_dsl_paperless_25_48_manual"
+MTM_DSL_PAPERLESS_25_48_ANY = "mtm_dsl_paperless_25_48_any"
 MTM_NOINTERNET_MAILED_0_24 = "mtm_nointernet_mailed_0_24"
+MTM_NOINTERNET_NO_0_6 = "mtm_nointernet_no_0_6"
 CLASSIFIER = "classifier"
 RESIDUAL = "residual"
 
@@ -56,15 +62,26 @@ SPECIALIST_PRESETS: dict[str, str] = {
     MANUAL_NO_INTERNET: "InternetService=No con payment manual (Electronic o Mailed check).",
     ONE_YEAR_FIBER_ANY: "One year, Fiber optic, cualquier tenure.",
     ONE_YEAR_DSL_ANY: "One year, DSL, cualquier tenure.",
+    ONE_YEAR_DSL_PAPERLESS_49PLUS: "One year, DSL, PaperlessBilling=Yes, tenure >= 49.",
     TWO_YEAR_FIBER_ANY: "Two year, Fiber optic, cualquier tenure.",
+    TWO_YEAR_DSL_PAPERLESS_49PLUS: "Two year, DSL, PaperlessBilling=Yes, tenure >= 49.",
     ONE_YEAR_FIBER_PAPERLESS_49PLUS: "One year, Fiber optic, PaperlessBilling=Yes, tenure >= 49.",
+    ONE_YEAR_FIBER_PAPERLESS_25_48: "One year, Fiber optic, PaperlessBilling=Yes, tenure 25-48.",
     TWO_YEAR_FIBER_PAPERLESS_49PLUS: "Two year, Fiber optic, PaperlessBilling=Yes, tenure >= 49.",
+    TWO_YEAR_FIBER_NOPAPERLESS_49PLUS: "Two year, Fiber optic, PaperlessBilling=No, tenure >= 49.",
     MTM_DSL_PAPERLESS_25_48_MANUAL: (
         "Month-to-month, DSL, PaperlessBilling=Yes, tenure 25-48, "
         "payment manual (Electronic check o Mailed check)."
     ),
+    MTM_DSL_PAPERLESS_25_48_ANY: (
+        "Month-to-month, DSL, PaperlessBilling=Yes, tenure 25-48, "
+        "cualquier payment method."
+    ),
     MTM_NOINTERNET_MAILED_0_24: (
         "Month-to-month, InternetService=No, Mailed check, tenure <= 24."
+    ),
+    MTM_NOINTERNET_NO_0_6: (
+        "Month-to-month, InternetService=No, PaperlessBilling=No, tenure <= 6."
     ),
 }
 
@@ -152,12 +169,20 @@ def build_specialist_mask(frame: pd.DataFrame, preset: str) -> pd.Series:
         return contract.eq("One year") & internet.eq("Fiber optic")
     if preset == ONE_YEAR_DSL_ANY:
         return contract.eq("One year") & internet.eq("DSL")
+    if preset == ONE_YEAR_DSL_PAPERLESS_49PLUS:
+        return contract.eq("One year") & internet.eq("DSL") & paperless.eq("Yes") & tenure.ge(49)
     if preset == TWO_YEAR_FIBER_ANY:
         return contract.eq("Two year") & internet.eq("Fiber optic")
+    if preset == TWO_YEAR_DSL_PAPERLESS_49PLUS:
+        return contract.eq("Two year") & internet.eq("DSL") & paperless.eq("Yes") & tenure.ge(49)
     if preset == ONE_YEAR_FIBER_PAPERLESS_49PLUS:
         return contract.eq("One year") & internet.eq("Fiber optic") & paperless.eq("Yes") & tenure.ge(49)
+    if preset == ONE_YEAR_FIBER_PAPERLESS_25_48:
+        return contract.eq("One year") & internet.eq("Fiber optic") & paperless.eq("Yes") & tenure.between(25, 48)
     if preset == TWO_YEAR_FIBER_PAPERLESS_49PLUS:
         return contract.eq("Two year") & internet.eq("Fiber optic") & paperless.eq("Yes") & tenure.ge(49)
+    if preset == TWO_YEAR_FIBER_NOPAPERLESS_49PLUS:
+        return contract.eq("Two year") & internet.eq("Fiber optic") & paperless.eq("No") & tenure.ge(49)
     if preset == MTM_DSL_PAPERLESS_25_48_MANUAL:
         return (
             contract.eq("Month-to-month")
@@ -166,12 +191,21 @@ def build_specialist_mask(frame: pd.DataFrame, preset: str) -> pd.Series:
             & tenure.between(25, 48)
             & payment.isin(["Electronic check", "Mailed check"])
         )
+    if preset == MTM_DSL_PAPERLESS_25_48_ANY:
+        return contract.eq("Month-to-month") & internet.eq("DSL") & paperless.eq("Yes") & tenure.between(25, 48)
     if preset == MTM_NOINTERNET_MAILED_0_24:
         return (
             contract.eq("Month-to-month")
             & internet.eq("No")
             & payment.eq("Mailed check")
             & tenure.le(24)
+        )
+    if preset == MTM_NOINTERNET_NO_0_6:
+        return (
+            contract.eq("Month-to-month")
+            & internet.eq("No")
+            & paperless.eq("No")
+            & tenure.le(6)
         )
     raise ValueError(f"Unsupported specialist preset '{preset}'. Available: {sorted(SPECIALIST_PRESETS)}")
 

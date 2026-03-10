@@ -349,9 +349,17 @@ Presets soportados por la linea local:
 - `manual_no_internet`
 - `one_year_fiber_any`
 - `one_year_dsl_any`
+- `one_year_dsl_paperless_49plus`: One year + DSL + PaperlessBilling=Yes + tenure >= 49
 - `two_year_fiber_any`
+- `two_year_dsl_paperless_49plus`: Two year + DSL + PaperlessBilling=Yes + tenure >= 49
 - `one_year_fiber_paperless_49plus`
+- `one_year_fiber_paperless_25_48`: One year + Fiber optic + PaperlessBilling=Yes + tenure 25-48 inclusive
 - `two_year_fiber_paperless_49plus`
+- `two_year_fiber_nopaperless_49plus`: Two year + Fiber optic + PaperlessBilling=No + tenure >= 49
+- `mtm_dsl_paperless_25_48_manual`: Month-to-month + DSL + PaperlessBilling=Yes + tenure 25-48 + pago manual
+- `mtm_dsl_paperless_25_48_any`: Month-to-month + DSL + PaperlessBilling=Yes + tenure 25-48 + cualquier pago
+- `mtm_nointernet_mailed_0_24`: Month-to-month + InternetService=No + Mailed check + tenure <= 24
+- `mtm_nointernet_no_0_6`: Month-to-month + InternetService=No + PaperlessBilling=No + tenure <= 6
 
 3i4. Probar una senal ortogonal barata con modelo lineal disperso
 
@@ -375,12 +383,73 @@ Familias soportadas:
 - `logistic`
 - `spline_logistic`: aplica spline basis solo sobre un subconjunto curado de variables
   numericas continuas y deja el resto en camino lineal
+- `catboost_meta`: booster chico sobre el mismo `teacher_meta`, pensado para detectar
+  interacciones no lineales con regularizacion fuerte
+
+Modos de features soportados:
+- `raw`: usa la matriz tabular normal construida desde `train.csv` y `--feature-blocks`
+- `teacher_meta`: usa una matriz compacta con:
+  - cohort keys (`PaymentMethod`, `Contract`, `InternetService`, `PaperlessBilling`, `tenure_bin`)
+  - `reference_pred_feature`
+  - `reference_logit_feature`
+  - componentes `pred_*` del teacher
+  - estadisticas de desacuerdo entre componentes del teacher
+  - requiere que `--reference-weights-json` y `--oof` apunten a predicciones OOF
+    alineadas por `id`
+  - `catboost_meta` solo se soporta sobre este modo
+
+Nota:
+- en `teacher_meta`, `--feature-blocks` se ignora; dejarlo en `none` evita ambiguedad
+
+Ejemplo `teacher_meta`:
+
+```bash
+python scripts/experiment_linear_probe.py \
+  --model-family logistic \
+  --feature-mode teacher_meta \
+  --feature-blocks none \
+  --reference-is-oof \
+  --reference-weights-json artifacts/reports/submission_candidate_cb5_xgb3_lgb_r_rvhi_weights.json \
+  --oof cb=artifacts/reports/train_cv_multiseed_gate_s5_hiiter_oof.csv#oof_ensemble \
+  --oof xgb=artifacts/reports/train_xgboost_cv_multiseed_hiiter_oof.csv#oof_ensemble \
+  --oof lgb=artifacts/reports/train_lightgbm_cv_full_hiiter_oof.csv#oof_pred \
+  --oof r=artifacts/reports/fe_blockR_hiiter_oof.csv#oof_pred \
+  --oof rv=artifacts/reports/fe_blockRV_hiiter_oof.csv#oof_pred
+```
+
+Ejemplo `catboost_meta`:
+
+```bash
+python scripts/experiment_linear_probe.py \
+  --model-family catboost_meta \
+  --feature-mode teacher_meta \
+  --feature-blocks none \
+  --reference-is-oof \
+  --tree-iterations 300 \
+  --tree-depth 4 \
+  --tree-learning-rate 0.05 \
+  --tree-l2-leaf-reg 8.0 \
+  --tree-early-stopping-rounds 50 \
+  --reference-weights-json artifacts/reports/submission_candidate_cb5_xgb3_lgb_r_rvhi_weights.json \
+  --oof cb=artifacts/reports/train_cv_multiseed_gate_s5_hiiter_oof.csv#oof_ensemble \
+  --oof xgb=artifacts/reports/train_xgboost_cv_multiseed_hiiter_oof.csv#oof_ensemble \
+  --oof lgb=artifacts/reports/train_lightgbm_cv_full_hiiter_oof.csv#oof_pred \
+  --oof r=artifacts/reports/fe_blockR_hiiter_oof.csv#oof_pred \
+  --oof rv=artifacts/reports/fe_blockRV_hiiter_oof.csv#oof_pred
+```
 
 Prerequisitos minimos del probe lineal:
 - `train.csv`
-- `--reference-weights-json` con objeto `{"weights": {...}}`
-- uno o mas `--oof` con formato `<name>=<path>[#<prediction_column>]`
-- las keys de `weights` deben coincidir con los nombres entregados en `--oof`
+- para `--feature-mode raw`: solo `train.csv`
+- para `--feature-mode teacher_meta`:
+  - `--reference-is-oof`
+  - `--reference-weights-json` con objeto `{"weights": {...}}`
+  - uno o mas `--oof` con formato `<name>=<path>[#<prediction_column>]`
+  - las keys de `weights` deben coincidir con los nombres entregados en `--oof`
+  - el merge OOF debe contener columnas `pred_*` y cubrir todos los `id` de train
+- nota: incluso en `--feature-mode raw`, si entregas `--reference-weights-json` para
+  medir contra una referencia, debes entregar tambien `--oof` y `--reference-is-oof`
+  porque el script reconstruye la referencia OOF y valida esa cobertura por `id`
 
 3i5. Probar una senal ortogonal con `FM/FFM` via `river`
 
