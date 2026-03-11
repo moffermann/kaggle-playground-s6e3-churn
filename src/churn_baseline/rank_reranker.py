@@ -13,7 +13,6 @@ from sklearn.model_selection import StratifiedKFold
 from .artifacts import ensure_parent_dir, write_json
 from .config import CatBoostHyperParams, ID_COLUMN, TARGET_COLUMN
 from .data import infer_categorical_columns, load_csv
-from .diagnostics import _rank_average_predictions
 from .evaluation import binary_auc
 from .feature_engineering import normalize_feature_blocks
 from .pipeline import (
@@ -24,7 +23,7 @@ from .pipeline import (
     _transform_single_with_stateful_blocks,
     normalize_stratify_mode,
 )
-from .specialist import _append_reference_features, _normalize_reference_component_frame
+from .specialist import _append_reference_features, _normalize_reference_component_frame, build_specialist_mask
 
 
 PAIR_LOGIT_PAIRWISE = "PairLogitPairwise"
@@ -38,6 +37,8 @@ RANK_RERANKER_QUERY_LEVELS: tuple[str, ...] = (
     "contract",
     "global",
 )
+_MIN_LOCAL_RERANK_TRAIN_ROWS = 2000
+_MIN_LOCAL_RERANK_VALID_ROWS = 500
 
 
 def list_rank_reranker_losses() -> tuple[str, ...]:
@@ -190,26 +191,16 @@ def _best_iteration_or_default(model: CatBoostRanker, default_iterations: int) -
     return int(best_iter) + 1
 
 
-def _blend_rank_scores(
+def _reorder_reference_by_rank(
     reference_pred: pd.Series,
     ranker_score: pd.Series,
-    alpha: float,
 ) -> pd.Series:
-    pred_matrix = np.column_stack(
-        [
-            reference_pred.astype("float64").to_numpy(),
-            ranker_score.astype("float64").to_numpy(),
-        ]
-    )
-    rank_matrix = np.zeros_like(pred_matrix, dtype="float64")
-    rank_matrix[:, 0] = pd.Series(pred_matrix[:, 0], index=reference_pred.index).rank(method="average").to_numpy(
-        dtype="float64"
-    )
-    rank_matrix[:, 1] = pd.Series(pred_matrix[:, 1], index=ranker_score.index).rank(method="average").to_numpy(
-        dtype="float64"
-    )
-    blended = (1.0 - float(alpha)) * rank_matrix[:, 0] + float(alpha) * rank_matrix[:, 1]
-    return pd.Series(blended, index=reference_pred.index, dtype="float64", name="candidate_score")
+    reference_values = reference_pred.astype("float64").to_numpy()
+    sorted_reference = np.sort(reference_values)
+    order = np.argsort(ranker_score.astype("float64").to_numpy(), kind="mergesort")
+    reordered = np.empty_like(sorted_reference)
+    reordered[order] = sorted_reference
+    return pd.Series(reordered, index=reference_pred.index, dtype="float64", name="candidate_score")
 
 
 def _save_model(model: CatBoostRanker, path: str | Path) -> Path:
@@ -277,6 +268,7 @@ def run_rank_reranker_cv(
     min_query_negative_rows: int = 10,
     max_pairs_per_group: int = 1000,
     include_logit_reference: bool = True,
+    preset: str | None = None,
 ) -> dict[str, Any]:
     """Train a CatBoost ranker over teacher-aware features and scan rank blends."""
     if folds < 2:
@@ -288,6 +280,16 @@ def run_rank_reranker_cv(
     normalized_blocks, _, stateful_blocks, x_base, y = _prepare_train_matrix(train_df, feature_blocks)
     normalized_stratify_mode = normalize_stratify_mode(stratify_mode)
     query_candidates = _build_query_candidate_frame(train_df)
+    local_mask = None
+    if preset is not None:
+        local_mask = build_specialist_mask(train_df, preset).astype(bool)
+        local_rows = int(local_mask.sum())
+        if local_rows < _MIN_LOCAL_RERANK_TRAIN_ROWS:
+            raise ValueError(
+                f"Preset '{preset}' selects only {local_rows} rows. Minimum required: {_MIN_LOCAL_RERANK_TRAIN_ROWS}"
+            )
+        if y.loc[local_mask].nunique() < 2:
+            raise ValueError(f"Preset '{preset}' must contain both classes.")
     aligned_reference = _align_reference_prediction(
         train_ids=train_df[ID_COLUMN],
         reference_pred=reference_pred,
@@ -337,16 +339,47 @@ def run_rank_reranker_cv(
         )
         disagreement_columns = train_disagreement_columns or valid_disagreement_columns
 
+        train_local_mask = None if local_mask is None else local_mask.iloc[train_idx].to_numpy(dtype=bool)
+        valid_local_mask = None if local_mask is None else local_mask.iloc[valid_idx].to_numpy(dtype=bool)
+        if train_local_mask is not None:
+            local_train_rows = int(np.sum(train_local_mask))
+            local_valid_rows = int(np.sum(valid_local_mask))
+            if local_train_rows < _MIN_LOCAL_RERANK_TRAIN_ROWS:
+                raise ValueError(
+                    f"Fold {fold_number} preset '{preset}' train rows {local_train_rows} below minimum."
+                )
+            if local_valid_rows < _MIN_LOCAL_RERANK_VALID_ROWS:
+                raise ValueError(
+                    f"Fold {fold_number} preset '{preset}' valid rows {local_valid_rows} below minimum."
+                )
+            x_train_fit = x_train.iloc[train_local_mask]
+            y_train_fit = y_train.iloc[train_local_mask]
+            x_valid_fit = x_valid.iloc[valid_local_mask]
+            y_valid_fit = y_valid.iloc[valid_local_mask]
+            train_reference_eval = train_reference.iloc[train_local_mask]
+            valid_reference_eval = valid_reference.iloc[valid_local_mask]
+            train_query_frame = query_candidates.iloc[train_idx].iloc[train_local_mask]
+            valid_query_frame = query_candidates.iloc[valid_idx].iloc[valid_local_mask]
+        else:
+            x_train_fit = x_train
+            y_train_fit = y_train
+            x_valid_fit = x_valid
+            y_valid_fit = y_valid
+            train_reference_eval = train_reference
+            valid_reference_eval = valid_reference
+            train_query_frame = query_candidates.iloc[train_idx]
+            valid_query_frame = query_candidates.iloc[valid_idx]
+
         train_query_ids, train_levels, train_level_counts = _assign_query_groups(
-            query_candidates.iloc[train_idx],
-            y_train,
+            train_query_frame,
+            y_train_fit,
             min_rows=min_query_rows,
             min_positive_rows=min_query_positive_rows,
             min_negative_rows=min_query_negative_rows,
         )
         valid_query_ids, valid_levels, valid_level_counts = _assign_query_groups(
-            query_candidates.iloc[valid_idx],
-            y_valid,
+            valid_query_frame,
+            y_valid_fit,
             min_rows=min_query_rows,
             min_positive_rows=min_query_positive_rows,
             min_negative_rows=min_query_negative_rows,
@@ -354,9 +387,17 @@ def run_rank_reranker_cv(
         for name, count in train_level_counts.items():
             overall_query_level_counts[name] = overall_query_level_counts.get(name, 0) + int(count)
 
-        cat_columns = infer_categorical_columns(x_train)
-        x_train_sorted, y_train_sorted, train_group_sorted = _sort_grouped_frame(x_train, y_train, train_query_ids)
-        x_valid_sorted, y_valid_sorted, valid_group_sorted = _sort_grouped_frame(x_valid, y_valid, valid_query_ids)
+        cat_columns = infer_categorical_columns(x_train_fit)
+        x_train_sorted, y_train_sorted, train_group_sorted = _sort_grouped_frame(
+            x_train_fit,
+            y_train_fit,
+            train_query_ids,
+        )
+        x_valid_sorted, y_valid_sorted, valid_group_sorted = _sort_grouped_frame(
+            x_valid_fit,
+            y_valid_fit,
+            valid_query_ids,
+        )
 
         train_pairs = _build_sampled_pairs(
             y_train_sorted,
@@ -393,8 +434,11 @@ def run_rank_reranker_cv(
             early_stopping_rounds=int(early_stopping_rounds),
             verbose=int(verbose),
         )
-        valid_rank_score = pd.Series(model.predict(x_valid), index=x_valid.index, dtype="float64")
-        ranker_oof.iloc[valid_idx] = valid_rank_score
+        valid_rank_score = pd.Series(model.predict(x_valid_fit), index=x_valid_fit.index, dtype="float64")
+        if valid_local_mask is not None:
+            ranker_oof.iloc[np.asarray(valid_idx)[valid_local_mask]] = valid_rank_score.values
+        else:
+            ranker_oof.iloc[valid_idx] = valid_rank_score.values
 
         fold_best_iteration = _best_iteration_or_default(model, params.iterations)
         fold_iterations.append(int(fold_best_iteration))
@@ -402,14 +446,14 @@ def run_rank_reranker_cv(
         fold_rows.append(
             {
                 "fold": int(fold_number),
-                "train_rows": int(len(train_idx)),
-                "valid_rows": int(len(valid_idx)),
+                "train_rows": int(len(y_train_fit)),
+                "valid_rows": int(len(y_valid_fit)),
                 "train_query_count": int(len(np.unique(train_query_ids))),
                 "valid_query_count": int(len(np.unique(valid_query_ids))),
                 "train_query_level_counts": train_level_counts,
                 "valid_query_level_counts": valid_level_counts,
-                "reference_auc": float(binary_auc(y_valid, valid_reference)),
-                "ranker_auc": float(binary_auc(y_valid, valid_rank_score)),
+                "reference_auc": float(binary_auc(y_valid_fit, valid_reference_eval)),
+                "ranker_auc": float(binary_auc(y_valid_fit, valid_rank_score)),
                 "train_query_global_share": float(train_levels.eq("global").mean()),
                 "valid_query_global_share": float(valid_levels.eq("global").mean()),
                 "best_iteration": int(best_iteration_raw) if best_iteration_raw is not None and best_iteration_raw >= 0 else -1,
@@ -417,22 +461,36 @@ def run_rank_reranker_cv(
             }
         )
 
-    if ranker_oof.isna().any():
-        raise ValueError("OOF ranker predictions contain NaN values")
+    scoring_mask = local_mask if local_mask is not None else pd.Series(True, index=x_base.index, dtype=bool)
+    if ranker_oof.loc[scoring_mask].isna().any():
+        raise ValueError("OOF ranker predictions contain NaN values on the scoring mask")
+    reference_auc_on_mask = binary_auc(y.loc[scoring_mask], aligned_reference.loc[scoring_mask])
+    ranker_auc_on_mask = binary_auc(y.loc[scoring_mask], ranker_oof.loc[scoring_mask])
 
     alpha_rows: list[dict[str, Any]] = []
     best_alpha = float(alpha_grid[0])
     best_auc = float("-inf")
-    best_candidate = pd.Series(dtype="float64")
+    best_candidate = aligned_reference.copy()
     for alpha in alpha_grid:
-        candidate_score = _blend_rank_scores(aligned_reference, ranker_oof, float(alpha))
+        candidate_score = aligned_reference.copy()
+        reordered_reference = _reorder_reference_by_rank(
+            aligned_reference.loc[scoring_mask],
+            ranker_oof.loc[scoring_mask],
+        )
+        candidate_score.loc[scoring_mask] = (
+            (1.0 - float(alpha)) * aligned_reference.loc[scoring_mask].astype("float64")
+            + float(alpha) * reordered_reference
+        ).values
         candidate_auc = binary_auc(y, candidate_score)
+        candidate_auc_on_mask = binary_auc(y.loc[scoring_mask], candidate_score.loc[scoring_mask])
         alpha_rows.append(
             {
                 "alpha": float(alpha),
                 "candidate_oof_auc": float(candidate_auc),
+                "candidate_oof_auc_on_mask": float(candidate_auc_on_mask),
                 "reference_oof_auc": float(binary_auc(y, aligned_reference)),
-                "ranker_oof_auc": float(binary_auc(y, ranker_oof)),
+                "reference_oof_auc_on_mask": float(reference_auc_on_mask),
+                "ranker_oof_auc_on_mask": float(ranker_auc_on_mask),
             }
         )
         if candidate_auc > best_auc:
@@ -447,15 +505,23 @@ def run_rank_reranker_cv(
         reference_component_frame=component_frame,
         include_logit=include_logit_reference,
     )
+    if local_mask is not None:
+        x_full_fit = x_full.loc[local_mask]
+        y_full_fit = y.loc[local_mask]
+        full_query_frame = query_candidates.loc[local_mask]
+    else:
+        x_full_fit = x_full
+        y_full_fit = y
+        full_query_frame = query_candidates
     full_query_ids, full_query_levels, full_query_level_counts = _assign_query_groups(
-        query_candidates,
-        y,
+        full_query_frame,
+        y_full_fit,
         min_rows=min_query_rows,
         min_positive_rows=min_query_positive_rows,
         min_negative_rows=min_query_negative_rows,
     )
-    full_cat_columns = infer_categorical_columns(x_full)
-    x_full_sorted, y_full_sorted, full_group_sorted = _sort_grouped_frame(x_full, y, full_query_ids)
+    full_cat_columns = infer_categorical_columns(x_full_fit)
+    x_full_sorted, y_full_sorted, full_group_sorted = _sort_grouped_frame(x_full_fit, y_full_fit, full_query_ids)
     full_pairs = _build_sampled_pairs(
         y_full_sorted,
         full_group_sorted,
@@ -487,6 +553,7 @@ def run_rank_reranker_cv(
         {
             ID_COLUMN: train_df[ID_COLUMN].values,
             "target": y.astype(int).values,
+            "is_scoring_mask": scoring_mask.astype(int).values,
             "reference_pred": aligned_reference.values,
             "ranker_score": ranker_oof.values,
             "candidate_score": best_candidate.values,
@@ -497,8 +564,9 @@ def run_rank_reranker_cv(
 
     metrics: dict[str, Any] = {
         "loss_function": str(loss_function),
+        "preset": str(preset) if preset is not None else None,
         "feature_blocks": list(normalized_blocks),
-        "feature_count": int(x_full.shape[1]),
+        "feature_count": int(x_full_fit.shape[1]),
         "categorical_columns": full_cat_columns,
         "teacher_disagreement_columns": list(disagreement_columns),
         "cv_folds": int(folds),
@@ -514,9 +582,13 @@ def run_rank_reranker_cv(
         "query_level_counts_full_train": full_query_level_counts,
         "full_train_query_count": int(len(np.unique(full_query_ids))),
         "full_train_global_share": float(full_query_levels.eq("global").mean()),
+        "scoring_mask_rows": int(scoring_mask.sum()),
+        "scoring_mask_share": float(scoring_mask.mean()),
         "reference_oof_auc": float(binary_auc(y, aligned_reference)),
-        "ranker_oof_auc": float(binary_auc(y, ranker_oof)),
+        "reference_oof_auc_on_mask": float(reference_auc_on_mask),
+        "ranker_oof_auc_on_mask": float(ranker_auc_on_mask),
         "candidate_oof_auc": float(best_auc),
+        "candidate_oof_auc_on_mask": float(binary_auc(y.loc[scoring_mask], best_candidate.loc[scoring_mask])),
         "delta_vs_reference_oof_auc": float(best_auc - binary_auc(y, aligned_reference)),
         "best_alpha": float(best_alpha),
         "alpha_scan": alpha_rows,

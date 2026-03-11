@@ -422,6 +422,7 @@ python scripts/experiment_linear_probe.py \
 ```bash
 python scripts/experiment_rank_reranker.py \
   --feature-blocks H,R,S,V \
+  --preset global \
   --loss-function PairLogitPairwise \
   --folds 2 \
   --iterations 150 \
@@ -437,6 +438,10 @@ python scripts/experiment_rank_reranker.py \
 
 Notas del reranker:
 - usa el blend incumbente como `reference_pred`
+- puede correr en modo global o local con `--preset`
+  - default: `global`
+  - los valores locales validos son los mismos presets de `experiment_specialist_model.py`
+  - `python scripts/experiment_rank_reranker.py --help` muestra la lista exacta
 - agrega `pred_cb/xgb/lgb/r/rv` y estadisticas de desacuerdo del teacher
 - construye queries jerarquicas con fallback:
   - `segment5`

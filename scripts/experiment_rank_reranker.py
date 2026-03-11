@@ -15,7 +15,7 @@ from churn_baseline.config import CatBoostHyperParams, ID_COLUMN
 from churn_baseline.diagnostics import load_merged_oof_matrix, parse_feature_blocks_arg, parse_oof_input_spec
 from churn_baseline.pipeline import SUPPORTED_STRATIFY_MODES
 from churn_baseline.rank_reranker import list_rank_reranker_losses, run_rank_reranker_cv
-from churn_baseline.specialist import build_reference_prediction
+from churn_baseline.specialist import build_reference_prediction, list_specialist_presets
 
 
 DEFAULT_OOF_SPECS = (
@@ -53,6 +53,12 @@ def _load_weights(path: str | Path) -> dict[str, float]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run ranking-aware teacher reranker experiment")
     parser.add_argument("--train-csv", default="data/raw/train.csv", help="Path to train.csv")
+    parser.add_argument(
+        "--preset",
+        default="global",
+        choices=["global", *sorted(list_specialist_presets().keys())],
+        help="Optional local rerank mask. Use 'global' to rerank every row.",
+    )
     parser.add_argument(
         "--feature-blocks",
         default="H,R,S,V",
@@ -154,6 +160,7 @@ def main() -> int:
         feature_blocks=feature_blocks,
         reference_pred=reference_pred,
         reference_component_frame=reference_component_frame,
+        preset=None if args.preset == "global" else args.preset,
         folds=args.folds,
         random_state=args.random_state,
         early_stopping_rounds=args.early_stopping_rounds,
