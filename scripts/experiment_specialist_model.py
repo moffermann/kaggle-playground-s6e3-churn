@@ -19,6 +19,7 @@ from churn_baseline.specialist import (
     list_specialist_approaches,
     list_specialist_presets,
     run_family_feature_challenger_cv,
+    run_gated_challenger_cv,
     run_residual_reranker_cv,
     run_specialist_override_cv,
 )
@@ -77,7 +78,7 @@ def parse_args() -> argparse.Namespace:
         "--approach",
         default="classifier",
         choices=list(list_specialist_approaches()),
-        help="Specialist approach: direct local classifier, residual reranker, or family-prediction-as-feature challenger.",
+        help="Specialist approach: direct local classifier, residual reranker, family-prediction-as-feature challenger, or global gated challenger.",
     )
     parser.add_argument(
         "--feature-blocks",
@@ -104,6 +105,12 @@ def parse_args() -> argparse.Namespace:
         "--alpha-grid",
         default="0.00,0.05,0.10,0.15,0.20,0.30,0.40,0.50,0.60,0.70,0.80,0.90,1.00",
         help="Comma-separated alpha values for local override scan.",
+    )
+    parser.add_argument(
+        "--family-weight",
+        type=float,
+        default=2.0,
+        help="Training/eval weight applied to rows inside the target family for approach=gated.",
     )
     parser.add_argument(
         "--model-path",
@@ -187,6 +194,24 @@ def main() -> int:
             early_stopping_rounds=args.early_stopping_rounds,
             verbose=args.verbose,
             alpha_grid=alpha_grid,
+            model_path=args.model_path,
+            metrics_path=args.metrics_path,
+            oof_path=args.oof_path,
+        )
+    elif args.approach == "gated":
+        metrics = run_gated_challenger_cv(
+            train_csv_path=args.train_csv,
+            preset=args.preset,
+            reference_pred=reference_pred,
+            reference_component_frame=reference_component_frame,
+            params=params,
+            feature_blocks=feature_blocks,
+            folds=args.folds,
+            random_state=args.random_state,
+            early_stopping_rounds=args.early_stopping_rounds,
+            verbose=args.verbose,
+            alpha_grid=alpha_grid,
+            family_weight=args.family_weight,
             model_path=args.model_path,
             metrics_path=args.metrics_path,
             oof_path=args.oof_path,

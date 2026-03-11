@@ -303,6 +303,22 @@ En `approach=feature`, el CLI:
 - el JSON de metricas expone ambos artefactos como `global_model_path` y `family_model_path`
 - el OOF resultante escribe `family_specialist_pred`, `challenger_pred` y `candidate_pred`
 
+Formulacion `gated` para una macrofamilia:
+
+```bash
+python scripts/experiment_specialist_model.py --approach gated --preset ec_mtm_fiber_any --feature-blocks "H,R,S,V" --include-teacher-disagreement-features --family-weight 2.0
+```
+
+En `approach=gated`, el CLI:
+- entrena un challenger global sobre todas las filas;
+- agrega features de gating (`family_focus_mask`, `family_focus_reference_delta`) para la familia objetivo;
+- repondera train y validacion dentro del `preset` con `--family-weight`;
+- mantiene el mismo scan de blend contra `reference_pred`.
+- `--family-weight` debe ser `> 0`, por defecto vale `2.0`, y se reutiliza tambien en el fit final sobre todo el train.
+- guarda un solo modelo global en `--model-path`;
+- el OOF escribe `specialist_mask`, `reference_pred`, `challenger_pred` y `candidate_pred`;
+- el JSON de metricas expone `family_weight`, `family_gating_columns`, `best_alpha` y el delta global/on-mask contra la referencia.
+
 Notas para `--include-teacher-disagreement-features`:
 - agrega `teacher_component_*` y estadisticas derivadas (`std`, `range`, `top_gap`, deltas por pares) usando las columnas `pred_*` del OOF de referencia;
 - requiere que los `--oof` del incumbente expongan componentes individuales (`pred_cb`, `pred_xgb`, `pred_lgb`, `pred_r`, `pred_rv`) y no solo la mezcla final;
