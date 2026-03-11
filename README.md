@@ -101,7 +101,7 @@ Con estratificacion compuesta por target + familia:
 python scripts/train_cv_multiseed.py --folds 5 --seeds "42,2024,3407" --feature-blocks "G,H,R,V" --stratify-mode composite
 ```
 
-2d. Ejecutar experimento de feature engineering por bloques (A/B/C/F/G/H/R/S/V/O/P)
+2d. Ejecutar experimento de feature engineering por bloques (A/B/C/F/G/T/H/R/S/V/O/P)
 
 ```bash
 python scripts/experiment_features.py --feature-blocks "G,H,R,V" --stratify-mode composite
@@ -113,6 +113,9 @@ Notas:
 - Si quieres un benchmark distinto, apunta `--baseline-metrics-path` al reporte correcto.
 - `F` agrega una superficie target-free enfocada en `Electronic check + Month-to-month + Fiber optic`,
   con buckets de tenure mas finos, ranks y gaps internos dentro de esa macrofamilia.
+- `T` agrega la version `fit-aware` de esa superficie: ajusta mapas solo sobre train,
+  hace fallback `fine tenure + paperless -> tenure_bin + paperless -> paperless` y expone
+  ranks aproximados respecto de la distribucion aprendida en train.
 - Soporta un smoke monotónico experimental con:
   - `--monotonic-feature-set minimal`
   - `--monotonic-preset minimal`
@@ -156,7 +159,8 @@ Bloques relevantes para outliers:
 
 Bloques estructurales:
 - `G`: cobertura y backoff por familia fit-aware (`segment3/segment5`, soporte train-only, unseen/low-support, familia colapsada al padre).
-- Si entrenas con `G`, en inferencia debes pasar `--train-csv` a los CLI que materializan submissions para reconstruir el estado train-only.
+- `T`: superficie fit-aware enfocada en `Electronic check + Month-to-month + Fiber optic`, con fallback `fine tenure + paperless -> tenure_bin + paperless -> paperless` y ranks aproximados respecto del train.
+- Si entrenas con `G` o `T`, en inferencia debes pasar `--train-csv` a los CLI que materializan submissions para reconstruir el estado train-only.
 - `H`: contrastes intra-cohorte para bundles raros dentro de grupos duros (rareza y desvio respecto de la cohorte).
 - `R`: lifecycle y renovacion (`tenure_mod_*`, distancia a borde de contrato, bins de ciclo).
 - `S`: topologia del bundle y firma de servicios (support vs entertainment, archetype, signatures).
@@ -169,7 +173,7 @@ python scripts/make_submission.py --feature-blocks "G,H,R,V" --train-csv data/ra
 ```
 
 Nota:
-- `--train-csv` solo es obligatorio cuando usas bloques fit-aware como `G`.
+- `--train-csv` solo es obligatorio cuando usas bloques fit-aware como `G` o `T`.
 - El resultado JSON de `make_submission.py` y `make_submission_ensemble.py` ahora tambien expone
   `include_monotonic_features` para mantener trazabilidad cuando la inferencia se hace por API
   usando esa ruta del pipeline.
@@ -183,7 +187,7 @@ python scripts/make_submission_ensemble.py --feature-blocks "G,H,R,V" --train-cs
 Notas:
 - `make_submission_ensemble.py` usa `--model-paths` si los pasas manualmente.
 - Si no, lee `--metrics-path` y espera una clave `model_paths` en ese JSON.
-- `--train-csv` es necesario cuando usas bloques fit-aware como `G`, para reconstruir soporte/backoff con estado aprendido solo en train.
+- `--train-csv` es necesario cuando usas bloques fit-aware como `G` o `T`, para reconstruir estado aprendido solo en train.
 
 3b2. Generar submission desde experimento de priors jerarquicos
 
@@ -342,7 +346,7 @@ Formato de cada `--step`:
 
 Prerequisitos minimos:
 - `test.csv`
-- `train.csv` si algun step usa bloques fit-aware como `G`
+- `train.csv` si algun step usa bloques fit-aware como `G` o `T`
 - submission base con columnas `id, Churn`
 - modelos `.cbm` residuales ya entrenados
 
@@ -382,7 +386,7 @@ Este wrapper:
 Flags utiles del wrapper:
 - `--step` es obligatorio y puede repetirse una o mas veces.
 - `--teacher-aware` exige `--reference-mode base`.
-- `--train-csv` es necesario si algun paso o reconstruccion usa bloques fit-aware como `G`.
+- `--train-csv` es necesario si algun paso o reconstruccion usa bloques fit-aware como `G` o `T`.
 - `--reference-component-csv` permite reutilizar un frame `id + pred_*` ya construido.
 - `--reference-component-report-json` fija la ruta del JSON del builder cuando usas `--teacher-aware`.
 - `--test-csv` permite apuntar a otro `test.csv`.

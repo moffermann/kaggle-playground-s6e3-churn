@@ -15,6 +15,7 @@ BLOCK_B: Final[str] = "B"
 BLOCK_C: Final[str] = "C"
 BLOCK_F: Final[str] = "F"
 BLOCK_G: Final[str] = "G"
+BLOCK_T: Final[str] = "T"
 BLOCK_H: Final[str] = "H"
 BLOCK_R: Final[str] = "R"
 BLOCK_S: Final[str] = "S"
@@ -27,6 +28,7 @@ SUPPORTED_BLOCKS: Final[tuple[str, ...]] = (
     BLOCK_C,
     BLOCK_F,
     BLOCK_G,
+    BLOCK_T,
     BLOCK_H,
     BLOCK_R,
     BLOCK_S,
@@ -62,6 +64,9 @@ BLOCK_ALIASES: Final[dict[str, str]] = {
     "SURFACE": BLOCK_F,
     "FOCUS": BLOCK_F,
     "EC_SURFACE": BLOCK_F,
+    "SURFACE_FIT": BLOCK_T,
+    "TRAIN_SURFACE": BLOCK_T,
+    "EC_SURFACE_FIT": BLOCK_T,
     "HARD": BLOCK_H,
     "CONTRAST": BLOCK_H,
     "COHORT": BLOCK_H,
@@ -74,7 +79,7 @@ BLOCK_ALIASES: Final[dict[str, str]] = {
     "PRESSURE": BLOCK_V,
     "FRICTION": BLOCK_V,
 }
-STATEFUL_BLOCKS: Final[tuple[str, ...]] = (BLOCK_G,)
+STATEFUL_BLOCKS: Final[tuple[str, ...]] = (BLOCK_G, BLOCK_T)
 
 
 @dataclass(frozen=True)
@@ -84,6 +89,37 @@ class CoverageBackoffState:
     min_segment5_support: int
     segment3_counts: dict[str, int]
     segment5_counts: dict[str, int]
+
+
+@dataclass(frozen=True)
+class SurfaceProfile:
+    """Train-fitted summary stats for one EC surface cohort."""
+
+    rows: int
+    medians: dict[str, float]
+    quantile_edges: dict[str, tuple[float, ...]]
+
+
+@dataclass(frozen=True)
+class ECSurfaceFitState:
+    """Train-only surface profiles for EC/MTM/Fiber cohorts."""
+
+    min_detailed_support: int
+    min_coarse_support: int
+    detailed_profiles: dict[str, SurfaceProfile]
+    coarse_profiles: dict[str, SurfaceProfile]
+    paperless_profiles: dict[str, SurfaceProfile]
+
+
+EC_SURFACE_FEATURE_SPECS: Final[tuple[tuple[str, str], ...]] = (
+    ("monthly_charges", "monthly"),
+    ("total_charges", "total"),
+    ("monthly_per_active_service", "mpas"),
+    ("support_services_count", "support"),
+    ("paid_services_count", "paid"),
+    ("current_vs_effective_monthly_delta", "delta"),
+)
+EC_SURFACE_QUANTILES: Final[tuple[float, ...]] = tuple(round(step / 10.0, 1) for step in range(1, 10))
 
 
 def normalize_feature_blocks(feature_blocks: Sequence[str] | None) -> tuple[str, ...]:
@@ -141,6 +177,11 @@ def apply_feature_engineering(
                 "Feature block G requires train-fitted coverage state; "
                 "use pipeline helpers that fit on the training split first."
             )
+        if block == BLOCK_T:
+            raise ValueError(
+                "Feature block T requires train-fitted EC surface state; "
+                "use pipeline helpers that fit on the training split first."
+            )
         if block == BLOCK_H:
             out = _apply_block_h(out)
             continue
@@ -182,6 +223,14 @@ def _build_surface_tenure_bin(tenure_values: pd.Series) -> pd.Series:
         bins=[-np.inf, 2, 6, 12, 18, 24, 36, 48, 60, np.inf],
         labels=["0_2", "3_6", "7_12", "13_18", "19_24", "25_36", "37_48", "49_60", "61_plus"],
     ).astype(str)
+
+
+def _build_ec_surface_macro_mask(frame: pd.DataFrame) -> pd.Series:
+    return (
+        frame["PaymentMethod"].astype(str).eq("Electronic check")
+        & frame["Contract"].astype(str).eq("Month-to-month")
+        & frame["InternetService"].astype(str).eq("Fiber optic")
+    )
 
 
 def _ensure_tenure_bin(frame: pd.DataFrame) -> pd.Series:
@@ -344,6 +393,57 @@ def _support_bucket(counts: pd.Series) -> pd.Series:
     return buckets.astype(str)
 
 
+def _compute_quantile_edges(
+    values: pd.Series,
+    *,
+    quantiles: Sequence[float] = EC_SURFACE_QUANTILES,
+) -> tuple[float, ...]:
+    numeric = pd.to_numeric(values, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    if numeric.empty:
+        return ()
+    edges = numeric.quantile(list(quantiles)).astype("float64").to_numpy()
+    if edges.size == 0:
+        return ()
+    unique_edges = np.unique(edges[np.isfinite(edges)])
+    return tuple(float(edge) for edge in unique_edges.tolist())
+
+
+def _fit_surface_profiles(
+    keys: pd.Series,
+    values: pd.DataFrame,
+) -> dict[str, SurfaceProfile]:
+    profiles: dict[str, SurfaceProfile] = {}
+    for key, group in values.groupby(keys.astype(str), dropna=False):
+        medians: dict[str, float] = {}
+        quantile_edges: dict[str, tuple[float, ...]] = {}
+        for source_column, _ in EC_SURFACE_FEATURE_SPECS:
+            series = pd.to_numeric(group[source_column], errors="coerce").fillna(0.0).astype("float64")
+            medians[source_column] = float(series.median())
+            quantile_edges[source_column] = _compute_quantile_edges(series)
+        profiles[str(key)] = SurfaceProfile(
+            rows=int(len(group)),
+            medians=medians,
+            quantile_edges=quantile_edges,
+        )
+    return profiles
+
+
+def _approx_rank_from_edges(
+    values: pd.Series,
+    edge_series: pd.Series,
+) -> pd.Series:
+    numeric_values = pd.to_numeric(values, errors="coerce").fillna(0.0).astype("float64").to_numpy()
+    ranks = np.full(len(values), 0.5, dtype="float64")
+    for idx, (value, edges) in enumerate(zip(numeric_values, edge_series.tolist())):
+        if not isinstance(edges, (tuple, list, np.ndarray)) or len(edges) == 0:
+            continue
+        edges_arr = np.asarray(edges, dtype="float64")
+        if edges_arr.size == 0:
+            continue
+        ranks[idx] = (np.searchsorted(edges_arr, value, side="right") + 0.5) / float(edges_arr.size + 1)
+    return pd.Series(ranks, index=values.index, dtype="float64")
+
+
 def fit_coverage_backoff_state(
     frame: pd.DataFrame,
     *,
@@ -402,6 +502,246 @@ def apply_coverage_backoff_features(
         use_segment5,
         segment5.astype(str),
         "BACKOFF__" + segment3.astype(str),
+    )
+    return out
+
+
+def fit_ec_surface_state(
+    frame: pd.DataFrame,
+    *,
+    min_detailed_support: int = 75,
+    min_coarse_support: int = 75,
+) -> ECSurfaceFitState:
+    """Fit train-only surface profiles for EC/MTM/Fiber cohorts."""
+    service_columns = (
+        "OnlineSecurity",
+        "OnlineBackup",
+        "DeviceProtection",
+        "TechSupport",
+        "StreamingTV",
+        "StreamingMovies",
+    )
+    required = (
+        "PaymentMethod",
+        "Contract",
+        "InternetService",
+        "PaperlessBilling",
+        "tenure",
+        "PhoneService",
+        "MultipleLines",
+        "MonthlyCharges",
+        "TotalCharges",
+    )
+    _require_columns(frame, required + service_columns, block=BLOCK_T)
+
+    primitives = _compute_value_primitives(frame, block=BLOCK_T)
+    tenure_values = primitives["tenure_values"]
+    tenure_bin = _ensure_tenure_bin(frame)
+    macro_mask = _build_ec_surface_macro_mask(frame)
+    if not bool(macro_mask.any()):
+        return ECSurfaceFitState(
+            min_detailed_support=int(min_detailed_support),
+            min_coarse_support=int(min_coarse_support),
+            detailed_profiles={},
+            coarse_profiles={},
+            paperless_profiles={},
+        )
+
+    fine_tenure_bin = _build_surface_tenure_bin(tenure_values)
+    macro_df = pd.DataFrame(
+        {
+            "_paperless": frame.loc[macro_mask, "PaperlessBilling"].astype(str),
+            "_fine_tenure": fine_tenure_bin.loc[macro_mask].astype(str),
+            "_coarse_tenure": tenure_bin.loc[macro_mask].astype(str),
+            "monthly_charges": primitives["monthly_charges"].loc[macro_mask].astype("float64"),
+            "total_charges": primitives["total_charges"].loc[macro_mask].astype("float64"),
+            "monthly_per_active_service": primitives["monthly_per_active_service"].loc[macro_mask].astype("float64"),
+            "support_services_count": primitives["support_services_count"].loc[macro_mask].astype("float64"),
+            "paid_services_count": primitives["paid_services_count"].loc[macro_mask].astype("float64"),
+            "current_vs_effective_monthly_delta": primitives["current_vs_effective_monthly_delta"].loc[macro_mask].astype("float64"),
+        },
+        index=frame.index[macro_mask],
+    )
+
+    detailed_key = macro_df["_paperless"] + "__" + macro_df["_fine_tenure"]
+    coarse_key = macro_df["_paperless"] + "__" + macro_df["_coarse_tenure"]
+    paperless_key = macro_df["_paperless"]
+
+    return ECSurfaceFitState(
+        min_detailed_support=int(min_detailed_support),
+        min_coarse_support=int(min_coarse_support),
+        detailed_profiles=_fit_surface_profiles(detailed_key, macro_df),
+        coarse_profiles=_fit_surface_profiles(coarse_key, macro_df),
+        paperless_profiles=_fit_surface_profiles(paperless_key, macro_df),
+    )
+
+
+def apply_ec_surface_fit_features(
+    frame: pd.DataFrame,
+    state: ECSurfaceFitState,
+) -> pd.DataFrame:
+    """Append train-fitted EC surface features to any frame."""
+    service_columns = (
+        "OnlineSecurity",
+        "OnlineBackup",
+        "DeviceProtection",
+        "TechSupport",
+        "StreamingTV",
+        "StreamingMovies",
+    )
+    required = (
+        "PaymentMethod",
+        "Contract",
+        "InternetService",
+        "PaperlessBilling",
+        "tenure",
+        "PhoneService",
+        "MultipleLines",
+        "MonthlyCharges",
+        "TotalCharges",
+    )
+    _require_columns(frame, required + service_columns, block=BLOCK_T)
+
+    out = frame.copy()
+    primitives = _compute_value_primitives(out, block=BLOCK_T)
+    tenure_values = primitives["tenure_values"]
+    if "tenure_bin" not in out.columns:
+        out["tenure_bin"] = _build_tenure_bin(tenure_values)
+
+    macro_mask = _build_ec_surface_macro_mask(out)
+    fine_tenure_bin = _build_surface_tenure_bin(tenure_values)
+
+    out["ec_surface_fit_is_family"] = macro_mask.astype("int8")
+    out["ec_surface_fit_is_paperless_family"] = (
+        macro_mask & out["PaperlessBilling"].astype(str).eq("Yes")
+    ).astype("int8")
+    out["ec_surface_fit_level"] = "other"
+    out["ec_surface_fit_segment"] = "other"
+    out["ec_surface_fit_rows"] = 0
+    out["ec_surface_fit_support_bucket"] = "zero"
+    out["ec_surface_fit_used_coarse"] = 0
+    out["ec_surface_fit_used_paperless"] = 0
+    out["ec_surface_fit_monthly_minus_train_median"] = 0.0
+    out["ec_surface_fit_monthly_over_train_median"] = 1.0
+    out["ec_surface_fit_monthly_rank_fit"] = 0.5
+    out["ec_surface_fit_total_minus_train_median"] = 0.0
+    out["ec_surface_fit_total_rank_fit"] = 0.5
+    out["ec_surface_fit_mpas_minus_train_median"] = 0.0
+    out["ec_surface_fit_mpas_rank_fit"] = 0.5
+    out["ec_surface_fit_paid_minus_train_median"] = 0.0
+    out["ec_surface_fit_support_minus_train_median"] = 0.0
+    out["ec_surface_fit_delta_minus_train_median"] = 0.0
+    out["ec_surface_fit_delta_rank_fit"] = 0.5
+    out["ec_surface_fit_pressure_x_support_deficit"] = 0.0
+
+    if not bool(macro_mask.any()) or not state.paperless_profiles:
+        return out
+
+    macro_df = pd.DataFrame(
+        {
+            "_paperless": out.loc[macro_mask, "PaperlessBilling"].astype(str),
+            "_fine_tenure": fine_tenure_bin.loc[macro_mask].astype(str),
+            "_coarse_tenure": out.loc[macro_mask, "tenure_bin"].astype(str),
+            "monthly_charges": primitives["monthly_charges"].loc[macro_mask].astype("float64"),
+            "total_charges": primitives["total_charges"].loc[macro_mask].astype("float64"),
+            "monthly_per_active_service": primitives["monthly_per_active_service"].loc[macro_mask].astype("float64"),
+            "support_services_count": primitives["support_services_count"].loc[macro_mask].astype("float64"),
+            "paid_services_count": primitives["paid_services_count"].loc[macro_mask].astype("float64"),
+            "current_vs_effective_monthly_delta": primitives["current_vs_effective_monthly_delta"].loc[macro_mask].astype("float64"),
+            "support_deficit_count": primitives["support_deficit_count"].loc[macro_mask].astype("float64"),
+        },
+        index=out.index[macro_mask],
+    )
+
+    detailed_key = macro_df["_paperless"] + "__" + macro_df["_fine_tenure"]
+    coarse_key = macro_df["_paperless"] + "__" + macro_df["_coarse_tenure"]
+    paperless_key = macro_df["_paperless"]
+
+    detailed_rows_map = {key: profile.rows for key, profile in state.detailed_profiles.items()}
+    coarse_rows_map = {key: profile.rows for key, profile in state.coarse_profiles.items()}
+    paperless_rows_map = {key: profile.rows for key, profile in state.paperless_profiles.items()}
+
+    detailed_rows = detailed_key.map(detailed_rows_map).fillna(0).astype("int32")
+    coarse_rows = coarse_key.map(coarse_rows_map).fillna(0).astype("int32")
+    paperless_rows = paperless_key.map(paperless_rows_map).fillna(0).astype("int32")
+
+    use_detailed = detailed_rows.ge(int(state.min_detailed_support))
+    use_coarse = (~use_detailed) & coarse_rows.ge(int(state.min_coarse_support))
+    selected_level = pd.Series(
+        np.where(use_detailed, "detail", np.where(use_coarse, "coarse", "paperless")),
+        index=macro_df.index,
+        dtype="object",
+    )
+    selected_segment = pd.Series(
+        np.where(
+            use_detailed,
+            "detail__" + detailed_key.astype(str),
+            np.where(
+                use_coarse,
+                "coarse__" + coarse_key.astype(str),
+                "paperless__" + paperless_key.astype(str),
+            ),
+        ),
+        index=macro_df.index,
+        dtype="object",
+    )
+    selected_rows = pd.Series(
+        np.where(use_detailed, detailed_rows, np.where(use_coarse, coarse_rows, paperless_rows)),
+        index=macro_df.index,
+        dtype="int32",
+    )
+
+    out.loc[macro_df.index, "ec_surface_fit_level"] = selected_level.astype(str)
+    out.loc[macro_df.index, "ec_surface_fit_segment"] = selected_segment.astype(str)
+    out.loc[macro_df.index, "ec_surface_fit_rows"] = selected_rows.astype("int32")
+    out.loc[macro_df.index, "ec_surface_fit_support_bucket"] = _support_bucket(selected_rows)
+    out.loc[macro_df.index, "ec_surface_fit_used_coarse"] = use_coarse.astype("int8")
+    out.loc[macro_df.index, "ec_surface_fit_used_paperless"] = (~use_detailed & ~use_coarse).astype("int8")
+
+    combined_profiles: dict[str, SurfaceProfile] = {}
+    combined_profiles.update({f"detail__{key}": profile for key, profile in state.detailed_profiles.items()})
+    combined_profiles.update({f"coarse__{key}": profile for key, profile in state.coarse_profiles.items()})
+    combined_profiles.update({f"paperless__{key}": profile for key, profile in state.paperless_profiles.items()})
+
+    for source_column, prefix in EC_SURFACE_FEATURE_SPECS:
+        median_map = {
+            key: profile.medians[source_column]
+            for key, profile in combined_profiles.items()
+        }
+        edge_map = {
+            key: profile.quantile_edges[source_column]
+            for key, profile in combined_profiles.items()
+        }
+        selected_median = selected_segment.map(median_map)
+        selected_edges = selected_segment.map(edge_map)
+
+        selected_median = selected_median.fillna(macro_df[source_column]).astype("float64")
+        selected_rank = _approx_rank_from_edges(macro_df[source_column], selected_edges)
+        minus_series = (macro_df[source_column] - selected_median).astype("float64")
+
+        if prefix == "monthly":
+            out.loc[macro_df.index, "ec_surface_fit_monthly_minus_train_median"] = minus_series
+            out.loc[macro_df.index, "ec_surface_fit_monthly_over_train_median"] = (
+                macro_df[source_column] / selected_median.clip(lower=1.0)
+            ).astype("float64")
+            out.loc[macro_df.index, "ec_surface_fit_monthly_rank_fit"] = selected_rank.astype("float64")
+        elif prefix == "total":
+            out.loc[macro_df.index, "ec_surface_fit_total_minus_train_median"] = minus_series
+            out.loc[macro_df.index, "ec_surface_fit_total_rank_fit"] = selected_rank.astype("float64")
+        elif prefix == "mpas":
+            out.loc[macro_df.index, "ec_surface_fit_mpas_minus_train_median"] = minus_series
+            out.loc[macro_df.index, "ec_surface_fit_mpas_rank_fit"] = selected_rank.astype("float64")
+        elif prefix == "paid":
+            out.loc[macro_df.index, "ec_surface_fit_paid_minus_train_median"] = minus_series
+        elif prefix == "support":
+            out.loc[macro_df.index, "ec_surface_fit_support_minus_train_median"] = minus_series
+        elif prefix == "delta":
+            out.loc[macro_df.index, "ec_surface_fit_delta_minus_train_median"] = minus_series
+            out.loc[macro_df.index, "ec_surface_fit_delta_rank_fit"] = selected_rank.astype("float64")
+
+    out.loc[macro_df.index, "ec_surface_fit_pressure_x_support_deficit"] = (
+        out.loc[macro_df.index, "ec_surface_fit_monthly_over_train_median"].astype("float64")
+        * macro_df["support_deficit_count"].astype("float64")
     )
     return out
 
@@ -1131,20 +1471,11 @@ def _apply_block_f(frame: pd.DataFrame) -> pd.DataFrame:
     fallback_rows = macro_df.groupby(fallback_group, dropna=False)["_paperless"].transform("size")
     use_detailed = detailed_rows >= 75
 
-    feature_specs = (
-        ("monthly_charges", "monthly"),
-        ("total_charges", "total"),
-        ("monthly_per_active_service", "mpas"),
-        ("support_services_count", "support"),
-        ("paid_services_count", "paid"),
-        ("current_vs_effective_monthly_delta", "delta"),
-    )
-
     macro_features: dict[str, pd.Series] = {
         "rows": pd.Series(np.where(use_detailed, detailed_rows, fallback_rows), index=macro_df.index, dtype="float64"),
         "used_fallback": pd.Series((~use_detailed).astype("int8"), index=macro_df.index, dtype="int8"),
     }
-    for source_column, prefix in feature_specs:
+    for source_column, prefix in EC_SURFACE_FEATURE_SPECS:
         detailed_median = macro_df.groupby(detailed_group, dropna=False)[source_column].transform("median")
         fallback_median = macro_df.groupby(fallback_group, dropna=False)[source_column].transform("median")
         detailed_rank = macro_df.groupby(detailed_group, dropna=False)[source_column].rank(method="average", pct=True)

@@ -18,8 +18,11 @@ from .data import (
 from .evaluation import binary_auc
 from .feature_engineering import (
     BLOCK_G,
+    BLOCK_T,
     apply_coverage_backoff_features,
+    apply_ec_surface_fit_features,
     ensure_monotonic_features,
+    fit_ec_surface_state,
     fit_coverage_backoff_state,
     normalize_feature_blocks,
     partition_feature_blocks,
@@ -112,6 +115,10 @@ def _transform_pair_with_stateful_blocks(
         coverage_state = fit_coverage_backoff_state(fit_out)
         fit_out = apply_coverage_backoff_features(fit_out, coverage_state)
         apply_out = apply_coverage_backoff_features(apply_out, coverage_state)
+    if BLOCK_T in normalized_stateful:
+        surface_state = fit_ec_surface_state(fit_out)
+        fit_out = apply_ec_surface_fit_features(fit_out, surface_state)
+        apply_out = apply_ec_surface_fit_features(apply_out, surface_state)
     return fit_out, apply_out
 
 
@@ -153,7 +160,7 @@ def _prepare_test_matrix(
     if train_csv_path is None:
         raise ValueError(
             "Stateful feature blocks require train_csv_path at inference time. "
-            "Provide train_csv_path when using block G."
+            "Provide train_csv_path when using blocks like G or T."
         )
     train_df = load_csv(train_csv_path)
     _, _, _, x_train_base, _ = _prepare_train_matrix(

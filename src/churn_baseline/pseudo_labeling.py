@@ -17,7 +17,10 @@ from .data import infer_categorical_columns, load_csv, prepare_train_features
 from .evaluation import binary_auc
 from .feature_engineering import (
     BLOCK_G,
+    BLOCK_T,
     apply_coverage_backoff_features,
+    apply_ec_surface_fit_features,
+    fit_ec_surface_state,
     fit_coverage_backoff_state,
     normalize_feature_blocks,
     partition_feature_blocks,
@@ -122,7 +125,13 @@ def _apply_stateful_views(
         outputs = {
             name: apply_coverage_backoff_features(frame, coverage_state) for name, frame in outputs.items()
         }
-    unsupported = [block for block in normalized_stateful if block != BLOCK_G]
+    if BLOCK_T in normalized_stateful:
+        surface_state = fit_ec_surface_state(fit_out)
+        fit_out = apply_ec_surface_fit_features(fit_out, surface_state)
+        outputs = {
+            name: apply_ec_surface_fit_features(frame, surface_state) for name, frame in outputs.items()
+        }
+    unsupported = [block for block in normalized_stateful if block not in {BLOCK_G, BLOCK_T}]
     if unsupported:
         raise ValueError(
             "Unsupported stateful feature blocks for pseudo-labeling experiment: "

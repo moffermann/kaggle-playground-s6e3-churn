@@ -20,13 +20,11 @@ from .config import ID_COLUMN, TARGET_COLUMN
 from .data import encode_target, infer_categorical_columns, load_csv, prepare_test_features, prepare_train_features
 from .evaluation import binary_auc
 from .feature_engineering import (
-    BLOCK_G,
-    apply_coverage_backoff_features,
     apply_feature_engineering,
-    fit_coverage_backoff_state,
     normalize_feature_blocks,
     partition_feature_blocks,
 )
+from .pipeline import _transform_pair_with_stateful_blocks
 
 
 PASS_STATUS = "PASS"
@@ -696,11 +694,7 @@ def _transform_train_valid_for_generalization(
     stateless_blocks, stateful_blocks = partition_feature_blocks(normalized_blocks)
     x_train, y_train = prepare_train_features(train_df, drop_id=True, feature_blocks=stateless_blocks)
     x_valid, y_valid = prepare_train_features(valid_df, drop_id=True, feature_blocks=stateless_blocks)
-
-    if BLOCK_G in stateful_blocks:
-        coverage_state = fit_coverage_backoff_state(x_train)
-        x_train = apply_coverage_backoff_features(x_train, coverage_state)
-        x_valid = apply_coverage_backoff_features(x_valid, coverage_state)
+    x_train, x_valid = _transform_pair_with_stateful_blocks(x_train, x_valid, stateful_blocks)
 
     cat_columns = infer_categorical_columns(x_train)
     return x_train, y_train, x_valid, y_valid, cat_columns

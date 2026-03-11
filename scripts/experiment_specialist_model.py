@@ -81,7 +81,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--feature-blocks",
         default="H,R,S,V",
-        help="Comma-separated feature blocks for the specialist model (supported: A,B,C,F,H,R,S,V,O,P).",
+        help="Comma-separated feature blocks for the specialist model (supported: A,B,C,F,G,T,H,R,S,V,O,P).",
     )
     parser.add_argument(
         "--oof",
