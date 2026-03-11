@@ -417,6 +417,46 @@ python scripts/experiment_linear_probe.py \
   --oof rv=artifacts/reports/fe_blockRV_hiiter_oof.csv#oof_pred
 ```
 
+3i4b. Probar un reranker orientado a ranking sobre el teacher
+
+```bash
+python scripts/experiment_rank_reranker.py \
+  --feature-blocks H,R,S,V \
+  --loss-function PairLogitPairwise \
+  --folds 2 \
+  --iterations 150 \
+  --learning-rate 0.05 \
+  --depth 6 \
+  --l2-leaf-reg 5.0 \
+  --max-pairs-per-group 1000 \
+  --early-stopping-rounds 40 \
+  --metrics-path artifacts/reports/rank_reranker_pairlogit_smoke_metrics.json \
+  --oof-path artifacts/reports/rank_reranker_pairlogit_smoke_oof.csv \
+  --model-path artifacts/models/rank_reranker_pairlogit_smoke.cbm
+```
+
+Notas del reranker:
+- usa el blend incumbente como `reference_pred`
+- agrega `pred_cb/xgb/lgb/r/rv` y estadisticas de desacuerdo del teacher
+- construye queries jerarquicas con fallback:
+  - `segment5`
+  - `segment3`
+  - `contract_internet_tenure`
+  - `contract_tenure`
+  - `contract`
+  - `global`
+- combina el score del ranker con el teacher mediante `rank-average` ponderado por `alpha`
+- limita el costo pairwise muestreando hasta `max-pairs-per-group` pares por query
+- flags operativos importantes:
+  - `--reference-weights-json` y `--oof` controlan exactamente el teacher base
+  - `--alpha-grid` controla la mezcla `teacher + ranker`
+  - `--stratify-mode` controla solo el split externo de CV
+  - `--min-query-rows`, `--min-query-positive-rows`, `--min-query-negative-rows` controlan el fallback jerarquico
+  - `--train-csv`, `--random-state` y `--verbose` quedan expuestos para reproducibilidad
+- losses soportadas:
+  - `PairLogitPairwise`
+  - `YetiRankPairwise`
+
 Ejemplo `catboost_meta`:
 
 ```bash
