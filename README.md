@@ -415,6 +415,8 @@ Presets soportados por la linea local:
 - `ec_mtm_fiber_paperless_0_6`: Electronic check + Month-to-month + Fiber optic + PaperlessBilling=Yes + tenure <= 6
 - `ec_mtm_fiber_paperless_25_48`: Electronic check + Month-to-month + Fiber optic + PaperlessBilling=Yes + tenure 25-48
 - `ec_mtm_fiber_paperless_any`: Electronic check + Month-to-month + Fiber optic + PaperlessBilling=Yes + cualquier tenure
+- `ec_mtm_dsl_paperless_0_6`: Electronic check + Month-to-month + DSL + PaperlessBilling=Yes + tenure <= 6
+- `ec_mtm_dsl_paperless_any`: Electronic check + Month-to-month + DSL + PaperlessBilling=Yes + cualquier tenure
 
 3i4. Probar una senal ortogonal barata con modelo lineal disperso
 
