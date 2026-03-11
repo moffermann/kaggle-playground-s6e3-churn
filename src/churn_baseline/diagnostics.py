@@ -15,9 +15,18 @@ import pandas as pd
 from catboost import CatBoostClassifier
 from sklearn.model_selection import StratifiedKFold
 
-from .data import infer_categorical_columns
+from .artifacts import write_json
+from .config import ID_COLUMN, TARGET_COLUMN
+from .data import encode_target, infer_categorical_columns, load_csv, prepare_test_features, prepare_train_features
 from .evaluation import binary_auc
-from .feature_engineering import normalize_feature_blocks
+from .feature_engineering import (
+    BLOCK_G,
+    apply_coverage_backoff_features,
+    apply_feature_engineering,
+    fit_coverage_backoff_state,
+    normalize_feature_blocks,
+    partition_feature_blocks,
+)
 
 
 PASS_STATUS = "PASS"
@@ -33,6 +42,17 @@ class OOFInputSpec:
     name: str
     path: str
     prediction_column: str | None = None
+
+
+DEFAULT_REFERENCE_OOF_SPECS: tuple[str, ...] = (
+    "cb=artifacts/reports/train_cv_multiseed_gate_s5_hiiter_oof.csv#oof_ensemble",
+    "xgb=artifacts/reports/train_xgboost_cv_multiseed_hiiter_oof.csv#oof_ensemble",
+    "lgb=artifacts/reports/train_lightgbm_cv_full_hiiter_oof.csv#oof_pred",
+    "r=artifacts/reports/fe_blockR_hiiter_oof.csv#oof_pred",
+    "rv=artifacts/reports/fe_blockRV_hiiter_oof.csv#oof_pred",
+)
+
+SUPPORTED_FAMILY_LEVELS = ("segment3", "segment5")
 
 
 def utc_now_iso() -> str:
@@ -494,6 +514,391 @@ def load_merged_oof_matrix(
     if merged is None or merged.empty:
         raise ValueError("Merged OOF matrix is empty.")
     return merged, model_columns
+
+
+def load_reference_prediction_frame(
+    *,
+    reference_oof_spec: str | None = None,
+    oof_specs: Sequence[str] | None = None,
+    reference_weights_json: str | Path | None = None,
+    id_column: str = ID_COLUMN,
+    target_column: str = OOF_TARGET_COLUMN,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Load reference predictions from either a direct OOF file or a weighted blend."""
+    def _normalize_target_column(frame: pd.DataFrame) -> pd.DataFrame:
+        out = frame.copy()
+        target_series = out[target_column]
+        if pd.api.types.is_numeric_dtype(target_series):
+            out[target_column] = pd.to_numeric(target_series, errors="raise").astype("int8")
+        else:
+            out[target_column] = encode_target(target_series)
+        return out
+
+    if reference_oof_spec:
+        spec = parse_oof_input_spec(f"reference={reference_oof_spec}")
+        merged, _ = load_merged_oof_matrix((spec,), id_column=id_column, target_column=target_column)
+        merged = _normalize_target_column(merged)
+        reference_col = "pred_reference"
+        return (
+            merged[[id_column, target_column, reference_col]].rename(columns={reference_col: "reference_pred"}),
+            {
+                "mode": "direct_oof",
+                "reference_oof_spec": reference_oof_spec,
+            },
+        )
+
+    specs_raw = list(oof_specs or DEFAULT_REFERENCE_OOF_SPECS)
+    specs = [parse_oof_input_spec(raw) for raw in specs_raw]
+    merged, model_columns = load_merged_oof_matrix(specs, id_column=id_column, target_column=target_column)
+    merged = _normalize_target_column(merged)
+    if reference_weights_json is None:
+        raise ValueError("reference_weights_json is required when reference_oof_spec is not provided.")
+
+    payload = json.loads(Path(reference_weights_json).read_text(encoding="utf-8"))
+    weights_raw = payload.get("weights")
+    if not isinstance(weights_raw, dict) or not weights_raw:
+        raise ValueError(f"Could not find weights in {reference_weights_json}")
+
+    weights: dict[str, float] = {}
+    for name, value in weights_raw.items():
+        column = f"pred_{name}"
+        if column not in merged.columns:
+            raise ValueError(
+                f"Weight '{name}' from {reference_weights_json} does not match merged OOF columns {model_columns}."
+            )
+        weights[column] = float(value)
+
+    reference_pred = np.zeros(len(merged), dtype="float64")
+    for column, weight in weights.items():
+        reference_pred += merged[column].to_numpy(dtype="float64") * float(weight)
+
+    out = merged[[id_column, target_column]].copy()
+    out["reference_pred"] = reference_pred
+    return (
+        out,
+        {
+            "mode": "weighted_oof_blend",
+            "reference_weights_json": str(reference_weights_json),
+            "oof_specs": specs_raw,
+            "weights": {column.replace("pred_", ""): float(weight) for column, weight in weights.items()},
+        },
+    )
+
+
+def build_family_frame(
+    frame: pd.DataFrame,
+    *,
+    include_id: bool = True,
+) -> pd.DataFrame:
+    """Build reusable family keys from raw train/test rows."""
+    required = ("PaymentMethod", "Contract", "InternetService", "PaperlessBilling", "tenure")
+    missing = [column for column in required if column not in frame.columns]
+    if missing:
+        raise ValueError(f"Cannot build families; missing columns: {missing}")
+
+    work = frame.copy()
+    if TARGET_COLUMN in work.columns:
+        work = work.drop(columns=[TARGET_COLUMN])
+    if not include_id and ID_COLUMN in work.columns:
+        work = work.drop(columns=[ID_COLUMN])
+
+    engineered = apply_feature_engineering(work, feature_blocks=["A"])
+    out = pd.DataFrame(index=engineered.index)
+    if include_id and ID_COLUMN in frame.columns:
+        out[ID_COLUMN] = frame[ID_COLUMN].values
+    out["segment3"] = (
+        engineered["PaymentMethod"].astype(str)
+        + "__"
+        + engineered["Contract"].astype(str)
+        + "__"
+        + engineered["InternetService"].astype(str)
+    )
+    out["segment5"] = (
+        engineered["PaymentMethod"].astype(str)
+        + "__"
+        + engineered["Contract"].astype(str)
+        + "__"
+        + engineered["InternetService"].astype(str)
+        + "__"
+        + engineered["PaperlessBilling"].astype(str)
+        + "__"
+        + engineered["tenure_bin"].astype(str)
+    )
+    out["tenure_bin"] = engineered["tenure_bin"].astype(str)
+    return out
+
+
+def summarize_reference_family_metrics(
+    analysis_frame: pd.DataFrame,
+    *,
+    family_level: str,
+    test_family_counts: pd.Series | None = None,
+) -> pd.DataFrame:
+    """Aggregate reference metrics by family."""
+    if family_level not in SUPPORTED_FAMILY_LEVELS:
+        raise ValueError(f"Unsupported family_level '{family_level}'. Supported: {SUPPORTED_FAMILY_LEVELS}")
+
+    family_column = family_level
+    y_true = analysis_frame[OOF_TARGET_COLUMN].astype(int)
+    reference_pred = analysis_frame["reference_pred"].astype("float64")
+    reference_loss = -(y_true * np.log(reference_pred.clip(1e-6, 1.0 - 1e-6)) + (1.0 - y_true) * np.log((1.0 - reference_pred).clip(1e-6, 1.0 - 1e-6)))
+    work = analysis_frame[[family_column]].copy()
+    work["target"] = y_true.values
+    work["reference_pred"] = reference_pred.values
+    work["reference_loss"] = reference_loss.values
+
+    total_rows = float(len(work))
+    rows: list[dict[str, Any]] = []
+    for family_value, part in work.groupby(family_column, dropna=False):
+        positives = int(part["target"].sum())
+        family_auc = None
+        if part["target"].nunique(dropna=False) >= 2:
+            family_auc = float(binary_auc(part["target"], part["reference_pred"]))
+        test_rows = None
+        if test_family_counts is not None:
+            test_rows = int(test_family_counts.get(str(family_value), 0))
+        mean_loss = float(part["reference_loss"].mean())
+        rows.append(
+            {
+                "family_level": family_level,
+                "family_value": str(family_value),
+                "train_rows": int(len(part)),
+                "test_rows": test_rows,
+                "positive_rows": positives,
+                "positive_rate": float(part["target"].mean()),
+                "reference_auc": family_auc,
+                "reference_logloss": mean_loss,
+                "reference_logloss_contribution": float(mean_loss * float(len(part)) / total_rows),
+            }
+        )
+
+    summary = pd.DataFrame(rows)
+    if summary.empty:
+        return summary
+    if "test_rows" in summary.columns:
+        test_rows_series = summary["test_rows"].fillna(0).astype("float64")
+        summary["test_train_ratio"] = (test_rows_series / summary["train_rows"].clip(lower=1).astype("float64")).astype(
+            "float64"
+        )
+    return summary.sort_values(
+        by=["reference_logloss_contribution", "train_rows"],
+        ascending=[False, False],
+    ).reset_index(drop=True)
+
+
+def _transform_train_valid_for_generalization(
+    train_df: pd.DataFrame,
+    valid_df: pd.DataFrame,
+    *,
+    feature_blocks: Sequence[str] | None,
+) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series, list[str]]:
+    normalized_blocks = normalize_feature_blocks(feature_blocks)
+    stateless_blocks, stateful_blocks = partition_feature_blocks(normalized_blocks)
+    x_train, y_train = prepare_train_features(train_df, drop_id=True, feature_blocks=stateless_blocks)
+    x_valid, y_valid = prepare_train_features(valid_df, drop_id=True, feature_blocks=stateless_blocks)
+
+    if BLOCK_G in stateful_blocks:
+        coverage_state = fit_coverage_backoff_state(x_train)
+        x_train = apply_coverage_backoff_features(x_train, coverage_state)
+        x_valid = apply_coverage_backoff_features(x_valid, coverage_state)
+
+    cat_columns = infer_categorical_columns(x_train)
+    return x_train, y_train, x_valid, y_valid, cat_columns
+
+
+def evaluate_family_leaveout_generalization(
+    train_df: pd.DataFrame,
+    *,
+    family_assignments: pd.Series,
+    family_values: Sequence[str],
+    feature_blocks: Sequence[str] | None,
+    iterations: int,
+    learning_rate: float,
+    depth: int,
+    l2_leaf_reg: float,
+    random_seed: int,
+) -> pd.DataFrame:
+    """Train without selected families and score them as unseen cohorts."""
+    if len(train_df) != len(family_assignments):
+        raise ValueError("train_df and family_assignments must have the same length.")
+
+    rows: list[dict[str, Any]] = []
+    for family_value in family_values:
+        valid_mask = family_assignments.astype(str).eq(str(family_value))
+        train_part = train_df.loc[~valid_mask].copy()
+        valid_part = train_df.loc[valid_mask].copy()
+        if valid_part.empty:
+            continue
+
+        x_train, y_train, x_valid, y_valid, cat_columns = _transform_train_valid_for_generalization(
+            train_part,
+            valid_part,
+            feature_blocks=feature_blocks,
+        )
+
+        model = CatBoostClassifier(
+            iterations=int(iterations),
+            learning_rate=float(learning_rate),
+            depth=int(depth),
+            l2_leaf_reg=float(l2_leaf_reg),
+            loss_function="Logloss",
+            eval_metric="AUC",
+            random_seed=int(random_seed),
+            allow_writing_files=False,
+        )
+        model.fit(x_train, y_train, cat_features=cat_columns, verbose=False)
+        pred_valid = model.predict_proba(x_valid)[:, 1]
+        pred_valid_series = pd.Series(pred_valid, index=valid_part.index, dtype="float64")
+
+        auc_value = None
+        if y_valid.nunique(dropna=False) >= 2:
+            auc_value = float(binary_auc(y_valid, pred_valid_series))
+        loss_value = float(
+            -(
+                y_valid.astype("float64") * np.log(pred_valid_series.clip(1e-6, 1.0 - 1e-6))
+                + (1.0 - y_valid.astype("float64")) * np.log((1.0 - pred_valid_series).clip(1e-6, 1.0 - 1e-6))
+            ).mean()
+        )
+        rows.append(
+            {
+                "family_value": str(family_value),
+                "lofo_auc": auc_value,
+                "lofo_logloss": loss_value,
+                "lofo_rows": int(len(valid_part)),
+                "lofo_positive_rate": float(y_valid.mean()),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def run_family_generalization_compass(
+    *,
+    train_csv_path: str | Path,
+    test_csv_path: str | Path,
+    family_level: str,
+    feature_blocks: Sequence[str] | None,
+    top_k_families: int,
+    min_train_rows: int,
+    min_test_rows: int,
+    iterations: int,
+    learning_rate: float,
+    depth: int,
+    l2_leaf_reg: float,
+    random_seed: int,
+    reference_oof_spec: str | None = None,
+    oof_specs: Sequence[str] | None = None,
+    reference_weights_json: str | Path | None = None,
+    out_json_path: str | Path | None = None,
+    out_csv_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Build ranked family generalization compass using leave-one-family-out retraining."""
+    if family_level not in SUPPORTED_FAMILY_LEVELS:
+        raise ValueError(f"Unsupported family_level '{family_level}'. Supported: {SUPPORTED_FAMILY_LEVELS}")
+
+    train_df = load_csv(train_csv_path)
+    test_df = load_csv(test_csv_path)
+    family_train = build_family_frame(train_df)
+    family_test = build_family_frame(test_df)
+    reference_frame, reference_source = load_reference_prediction_frame(
+        reference_oof_spec=reference_oof_spec,
+        oof_specs=oof_specs,
+        reference_weights_json=reference_weights_json,
+        id_column=ID_COLUMN,
+        target_column=OOF_TARGET_COLUMN,
+    )
+
+    analysis = train_df[[ID_COLUMN, TARGET_COLUMN]].copy().merge(
+        family_train[[ID_COLUMN, "segment3", "segment5"]],
+        how="inner",
+        on=ID_COLUMN,
+        validate="one_to_one",
+    )
+    analysis = analysis.merge(
+        reference_frame[[ID_COLUMN, OOF_TARGET_COLUMN, "reference_pred"]],
+        how="inner",
+        on=ID_COLUMN,
+        validate="one_to_one",
+    )
+    if analysis.empty:
+        raise ValueError("Merged family generalization analysis frame is empty.")
+    train_target_encoded = encode_target(analysis[TARGET_COLUMN])
+    reference_target = analysis[OOF_TARGET_COLUMN].astype("int8")
+    if not np.array_equal(train_target_encoded.to_numpy(dtype="int8"), reference_target.to_numpy(dtype="int8")):
+        raise ValueError("Reference OOF target does not align with train.csv target labels.")
+    analysis = analysis.drop(columns=[OOF_TARGET_COLUMN]).rename(columns={TARGET_COLUMN: OOF_TARGET_COLUMN})
+    analysis[OOF_TARGET_COLUMN] = train_target_encoded.astype("int8").values
+
+    test_family_counts = family_test[family_level].astype(str).value_counts(dropna=False)
+    reference_summary = summarize_reference_family_metrics(
+        analysis,
+        family_level=family_level,
+        test_family_counts=test_family_counts,
+    )
+    gated = reference_summary[
+        reference_summary["train_rows"].ge(int(min_train_rows))
+        & reference_summary["test_rows"].fillna(0).astype(int).ge(int(min_test_rows))
+    ].copy()
+    selected = gated.head(int(top_k_families)).copy()
+
+    lofo = evaluate_family_leaveout_generalization(
+        train_df=train_df,
+        family_assignments=family_train[family_level],
+        family_values=selected["family_value"].tolist(),
+        feature_blocks=feature_blocks,
+        iterations=iterations,
+        learning_rate=learning_rate,
+        depth=depth,
+        l2_leaf_reg=l2_leaf_reg,
+        random_seed=random_seed,
+    )
+
+    combined = reference_summary.merge(lofo, how="left", on="family_value", validate="one_to_one")
+    if not combined.empty:
+        combined["generalization_gap_auc"] = combined["reference_auc"] - combined["lofo_auc"]
+        combined["generalization_gap_logloss"] = combined["lofo_logloss"] - combined["reference_logloss"]
+        combined["generalization_gap_logloss_contribution"] = (
+            combined["generalization_gap_logloss"] * combined["train_rows"].astype("float64") / float(len(train_df))
+        )
+
+    summary = {
+        "generated_at_utc": utc_now_iso(),
+        "train_csv_path": str(train_csv_path),
+        "test_csv_path": str(test_csv_path),
+        "family_level": family_level,
+        "feature_blocks": list(normalize_feature_blocks(feature_blocks)),
+        "reference_source": reference_source,
+        "selection": {
+            "top_k_families": int(top_k_families),
+            "min_train_rows": int(min_train_rows),
+            "min_test_rows": int(min_test_rows),
+            "eligible_family_count": int(len(gated)),
+            "evaluated_family_count": int(lofo["family_value"].nunique()) if not lofo.empty else 0,
+        },
+        "model_params": {
+            "iterations": int(iterations),
+            "learning_rate": float(learning_rate),
+            "depth": int(depth),
+            "l2_leaf_reg": float(l2_leaf_reg),
+            "random_seed": int(random_seed),
+        },
+        "top_reference_risk_families": reference_summary.head(min(int(top_k_families), len(reference_summary))).to_dict(
+            orient="records"
+        ),
+        "top_generalization_gap_families": combined.dropna(subset=["generalization_gap_logloss"]).sort_values(
+            by=["generalization_gap_logloss_contribution", "generalization_gap_auc"],
+            ascending=[False, False],
+            na_position="last",
+        ).head(min(int(top_k_families), len(combined))).to_dict(orient="records"),
+    }
+
+    if out_csv_path is not None:
+        out_csv = Path(out_csv_path)
+        out_csv.parent.mkdir(parents=True, exist_ok=True)
+        combined.to_csv(out_csv, index=False)
+    if out_json_path is not None:
+        write_json(out_json_path, summary)
+    return summary
 
 
 def normalize_weights(weights: np.ndarray) -> np.ndarray:

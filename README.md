@@ -31,6 +31,7 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |   |-- audit_submission_parity.py
 |   |-- analyze_train_test_drift.py
 |   |-- analyze_error_by_class.py
+|   |-- analyze_family_generalization.py
 |   |-- evaluate_ensemble_robustness.py
 |   |-- experiment_fm_probe.py
 |   |-- experiment_hierarchical_priors.py
@@ -217,6 +218,34 @@ python scripts/evaluate_ensemble_robustness.py --oof cb=artifacts/reports/train_
 ```bash
 python scripts/analyze_error_by_class.py --reference-weights-json artifacts/reports/submission_candidate_cb5_xgb3_lgb_r_weights.json --challenger-weights-json artifacts/reports/submission_candidate_cb5_xgb3_lgb_r_rvhi_weights.json
 ```
+
+3g2. Construir una brujula de generalizacion por familia con leave-one-family-out
+
+```bash
+python scripts/analyze_family_generalization.py --family-level segment5 --feature-blocks "H,R,V" --top-k-families 12
+```
+
+Notas:
+- Salidas por defecto:
+  - JSON: `artifacts/reports/diagnostic_family_generalization_summary.json`
+  - CSV: `artifacts/reports/diagnostic_family_generalization_families.csv`
+- El script tambien imprime el JSON resumido a `stdout`.
+- Por defecto usa como referencia el teacher blend `cb+xgb+lgb+r+rv` definido en `submission_candidate_cb5_xgb3_lgb_r_rvhi_weights.json`.
+- Si quieres una referencia directa distinta, puedes pasar `--reference-oof <path>[#<prediction_column>]`.
+- Si quieres reconstruir otra referencia ponderada, puedes pasar `--oof ...` y `--reference-weights-json ...`.
+- `--family-level` soporta `segment3` y `segment5`.
+- El rerun LOFO usa hiperparametros fijos y expone `--iterations`, `--learning-rate`, `--depth`, `--l2-leaf-reg`.
+- El JSON resume familias de mayor dano y mayor gap de generalizacion; el CSV deja la tabla completa con:
+  - `reference_auc`, `reference_logloss`, `reference_logloss_contribution`
+  - `lofo_auc`, `lofo_logloss`
+  - `generalization_gap_auc`, `generalization_gap_logloss`, `generalization_gap_logloss_contribution`
+- El JSON tambien incluye bloques estructurados: `reference_source`, `selection`, `model_params`,
+  `top_reference_risk_families` y `top_generalization_gap_families`.
+- `min_train_rows` y `min_test_rows` filtran familias que no tienen soporte suficiente para ser accionables.
+- El rerun LOFO no se ejecuta sobre todas las familias: primero se filtra por `min_train_rows` y
+  `min_test_rows`, y luego se evalua solo el `top-k` ordenado por `reference_logloss_contribution`.
+- En el CSV, las columnas `lofo_*` y `generalization_gap_*` quedan en `NaN` para familias que no
+  entraron en ese rerun LOFO.
 
 3h. Ejecutar experimento de especialista local sobre el incumbente
 
