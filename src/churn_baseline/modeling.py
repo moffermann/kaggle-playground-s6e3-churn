@@ -1,10 +1,11 @@
 """Model training and inference helpers."""
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import List, Optional
 
 import pandas as pd
-from catboost import CatBoostClassifier
+from catboost import CatBoostClassifier, Pool
 
 from .config import CatBoostHyperParams
 
@@ -23,14 +24,27 @@ def fit_with_validation(
     params: CatBoostHyperParams,
     early_stopping_rounds: int,
     verbose: int,
+    sample_weight_train: Sequence[float] | pd.Series | None = None,
+    sample_weight_valid: Sequence[float] | pd.Series | None = None,
 ) -> CatBoostClassifier:
     """Train CatBoost with validation and early stopping."""
     model = build_model(params)
+    eval_set: tuple[pd.DataFrame, pd.Series] | Pool
+    if sample_weight_valid is None:
+        eval_set = (x_valid, y_valid)
+    else:
+        eval_set = Pool(
+            data=x_valid,
+            label=y_valid,
+            cat_features=cat_columns,
+            weight=sample_weight_valid,
+        )
     model.fit(
         x_train,
         y_train,
         cat_features=cat_columns,
-        eval_set=(x_valid, y_valid),
+        sample_weight=sample_weight_train,
+        eval_set=eval_set,
         use_best_model=True,
         early_stopping_rounds=early_stopping_rounds,
         verbose=verbose,
@@ -44,6 +58,7 @@ def fit_full_train(
     cat_columns: List[str],
     params: CatBoostHyperParams,
     verbose: int,
+    sample_weight: Sequence[float] | pd.Series | None = None,
 ) -> CatBoostClassifier:
     """Train CatBoost on the full train split without eval set."""
     model = build_model(params)
@@ -51,6 +66,7 @@ def fit_full_train(
         x_train,
         y_train,
         cat_features=cat_columns,
+        sample_weight=sample_weight,
         verbose=verbose,
     )
     return model

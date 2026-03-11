@@ -23,6 +23,7 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |       |-- linear_probe.py
 |       |-- mlp_probe.py
 |       |-- modeling.py
+|       |-- pseudo_labeling.py
 |       |-- specialist.py
 |       |-- target_priors.py
 |       `-- pipeline.py
@@ -35,6 +36,7 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |   |-- experiment_hierarchical_priors.py
 |   |-- experiment_linear_probe.py
 |   |-- experiment_mlp_probe.py
+|   |-- experiment_pseudo_label_family.py
 |   |-- experiment_local_calibrator.py
 |   |-- experiment_specialist_model.py
 |   |-- build_teacher_component_frame.py
@@ -567,6 +569,43 @@ Salidas esperadas:
 - bundle `.pt` a `--model-path` (default: `artifacts/models/mlp_probe_smoke.pt`)
 - OOF a `--oof-path` (default: `artifacts/reports/mlp_probe_smoke_oof.csv`)
 - metricas y blend scan a `--metrics-path` (default: `artifacts/reports/mlp_probe_smoke_metrics.json`)
+
+3i7. Simular pseudo-labeling offline por familia
+
+```bash
+python scripts/experiment_pseudo_label_family.py \
+  --family-key "Electronic check__Month-to-month__Fiber optic__Yes__13_24" \
+  --feature-blocks "H,R,S,V" \
+  --label-mode soft \
+  --scale-pseudo-weight-by-confidence \
+  --upper-thresholds "0.88,0.85" \
+  --lower-thresholds "0.15,0.12" \
+  --pseudo-weights "0.05,0.10,0.20"
+```
+
+Este experimento no usa `test.csv`. Hace una simulacion offline dentro de `train.csv`:
+- separa un `holdout` global real para medir AUC;
+- esconde una fraccion de la familia objetivo como `pseudo_pool`;
+- genera pseudo-labels solo sobre esas filas usando el teacher OOF (`cb/xgb/lgb/r/rv`);
+- reentrena un `student` con pesos bajos en esas filas pseudo-etiquetadas;
+- barre `thresholds + pseudo_weight` y reporta el delta contra un baseline sin pseudo-labels.
+
+Contrato minimo:
+- `--family-key`: key exacta `segment5 = PaymentMethod__Contract__InternetService__PaperlessBilling__tenure_bin`
+- `--oof` y `--reference-weights-json` deben reconstruir el teacher OOF por `id`
+- si usas `--require-teacher-agreement` o `--max-teacher-std`, esos `--oof` deben exponer componentes `pred_*`, no solo la mezcla final
+- `--label-mode hard`: usa pseudo etiquetas binarias por threshold
+- `--label-mode soft`: duplica cada pseudo fila en dos ejemplos ponderados (`y=1` y `y=0`) usando la probabilidad del teacher
+- `--scale-pseudo-weight-by-confidence`: multiplica el peso base por `2 * |p - 0.5|`
+- `--require-teacher-agreement` exige que todos los componentes `pred_*` queden del mismo lado de `0.5`
+- `--max-teacher-std` permite filtrar solo filas con bajo desacuerdo entre teachers
+- defaults operativos: `holdout_size=0.15`, `valid_size=0.15`, `pseudo_pool_fraction=0.50`, `repeats=3`, `min_selected_rows=100`
+- la familia objetivo debe tener al menos `2000` filas en `train`, y cada repeticion debe dejar al menos `1000` filas de esa familia en el split de fit
+- `--results-csv-path` guarda el barrido detallado por repeticion/configuracion
+- `--metrics-path` resume la mejor configuracion y el ranking de configs
+
+La primera familia sugerida para smoke es:
+- `Electronic check__Month-to-month__Fiber optic__Yes__13_24`
 
 3j. Aplicar gate automatico GO/NO_GO para decidir submission
 
