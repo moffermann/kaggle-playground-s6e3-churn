@@ -2,6 +2,8 @@
 
 Fecha de inicializacion: `2026-03-04`
 
+Estado operativo actual: ver [phase-reset-summary.md](./phase-reset-summary.md)
+
 ## Hecho
 
 - Repositorio GitHub creado:
@@ -18,4 +20,7 @@ Fecha de inicializacion: `2026-03-04`
 
 - Los CSV y ZIP se ignoran en git por `.gitignore`.
 - Esta competencia usa `ROC AUC` como metrica.
-
+- Mejor incumbent publico vigente:
+  - `v3`
+  - Kaggle `ref 50828079`
+  - `public score = 0.91421`
