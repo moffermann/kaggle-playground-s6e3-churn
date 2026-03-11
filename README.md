@@ -412,6 +412,9 @@ Presets soportados por la linea local:
 - `mtm_dsl_paperless_25_48_any`: Month-to-month + DSL + PaperlessBilling=Yes + tenure 25-48 + cualquier pago
 - `mtm_nointernet_mailed_0_24`: Month-to-month + InternetService=No + Mailed check + tenure <= 24
 - `mtm_nointernet_no_0_6`: Month-to-month + InternetService=No + PaperlessBilling=No + tenure <= 6
+- `ec_mtm_fiber_paperless_0_6`: Electronic check + Month-to-month + Fiber optic + PaperlessBilling=Yes + tenure <= 6
+- `ec_mtm_fiber_paperless_25_48`: Electronic check + Month-to-month + Fiber optic + PaperlessBilling=Yes + tenure 25-48
+- `ec_mtm_fiber_paperless_any`: Electronic check + Month-to-month + Fiber optic + PaperlessBilling=Yes + cualquier tenure
 
 3i4. Probar una senal ortogonal barata con modelo lineal disperso
 

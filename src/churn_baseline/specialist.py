@@ -42,6 +42,9 @@ MTM_DSL_PAPERLESS_25_48_MANUAL = "mtm_dsl_paperless_25_48_manual"
 MTM_DSL_PAPERLESS_25_48_ANY = "mtm_dsl_paperless_25_48_any"
 MTM_NOINTERNET_MAILED_0_24 = "mtm_nointernet_mailed_0_24"
 MTM_NOINTERNET_NO_0_6 = "mtm_nointernet_no_0_6"
+EC_MTM_FIBER_PAPERLESS_0_6 = "ec_mtm_fiber_paperless_0_6"
+EC_MTM_FIBER_PAPERLESS_25_48 = "ec_mtm_fiber_paperless_25_48"
+EC_MTM_FIBER_PAPERLESS_ANY = "ec_mtm_fiber_paperless_any"
 CLASSIFIER = "classifier"
 RESIDUAL = "residual"
 
@@ -82,6 +85,15 @@ SPECIALIST_PRESETS: dict[str, str] = {
     ),
     MTM_NOINTERNET_NO_0_6: (
         "Month-to-month, InternetService=No, PaperlessBilling=No, tenure <= 6."
+    ),
+    EC_MTM_FIBER_PAPERLESS_0_6: (
+        "Electronic check, Month-to-month, Fiber optic, PaperlessBilling=Yes, tenure <= 6."
+    ),
+    EC_MTM_FIBER_PAPERLESS_25_48: (
+        "Electronic check, Month-to-month, Fiber optic, PaperlessBilling=Yes, tenure 25-48."
+    ),
+    EC_MTM_FIBER_PAPERLESS_ANY: (
+        "Electronic check, Month-to-month, Fiber optic, PaperlessBilling=Yes, cualquier tenure."
     ),
 }
 
@@ -206,6 +218,29 @@ def build_specialist_mask(frame: pd.DataFrame, preset: str) -> pd.Series:
             & internet.eq("No")
             & paperless.eq("No")
             & tenure.le(6)
+        )
+    if preset == EC_MTM_FIBER_PAPERLESS_0_6:
+        return (
+            contract.eq("Month-to-month")
+            & internet.eq("Fiber optic")
+            & payment.eq("Electronic check")
+            & paperless.eq("Yes")
+            & tenure.le(6)
+        )
+    if preset == EC_MTM_FIBER_PAPERLESS_25_48:
+        return (
+            contract.eq("Month-to-month")
+            & internet.eq("Fiber optic")
+            & payment.eq("Electronic check")
+            & paperless.eq("Yes")
+            & tenure.between(25, 48)
+        )
+    if preset == EC_MTM_FIBER_PAPERLESS_ANY:
+        return (
+            contract.eq("Month-to-month")
+            & internet.eq("Fiber optic")
+            & payment.eq("Electronic check")
+            & paperless.eq("Yes")
         )
     raise ValueError(f"Unsupported specialist preset '{preset}'. Available: {sorted(SPECIALIST_PRESETS)}")
 
