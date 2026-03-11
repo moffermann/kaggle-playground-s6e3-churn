@@ -50,6 +50,7 @@ EC_MTM_DSL_PAPERLESS_0_6 = "ec_mtm_dsl_paperless_0_6"
 EC_MTM_DSL_PAPERLESS_ANY = "ec_mtm_dsl_paperless_any"
 CLASSIFIER = "classifier"
 RESIDUAL = "residual"
+FEATURE = "feature"
 
 SPECIALIST_PRESETS: dict[str, str] = {
     EARLY_MANUAL_INTERNET: (
@@ -114,7 +115,7 @@ _MIN_SPECIALIST_VALID_ROWS = 500
 PLATT = "platt"
 ISOTONIC = "isotonic"
 CALIBRATION_METHODS: tuple[str, ...] = (PLATT, ISOTONIC)
-SPECIALIST_APPROACHES: tuple[str, ...] = (CLASSIFIER, RESIDUAL)
+SPECIALIST_APPROACHES: tuple[str, ...] = (CLASSIFIER, RESIDUAL, FEATURE)
 _TEACHER_COMPONENT_PREFIX = "teacher_component_"
 
 
@@ -469,7 +470,42 @@ def _predict_local_calibrator(bundle: dict[str, Any], pred: pd.Series | np.ndarr
     return pd.Series(calibrated, index=getattr(pred, "index", None), dtype="float64")
 
 
-def run_specialist_override_cv(
+def _derive_family_model_path(model_path: str | Path) -> Path:
+    path = Path(model_path)
+    suffix = path.suffix or ".cbm"
+    return path.with_name(f"{path.stem}_family{suffix}")
+
+
+def _append_family_stack_features(
+    x: pd.DataFrame,
+    *,
+    specialist_mask: pd.Series,
+    specialist_pred: pd.Series,
+    reference_pred: pd.Series,
+    neutral_value: float = 0.5,
+) -> pd.DataFrame:
+    out = x.copy()
+    specialist_mask_aligned = specialist_mask.reindex(out.index).fillna(False).astype(bool)
+    specialist_pred_aligned = specialist_pred.reindex(out.index)
+    reference_pred_aligned = reference_pred.reindex(out.index).astype("float64")
+
+    family_pred_feature = pd.Series(float(neutral_value), index=out.index, dtype="float64")
+    family_pred_feature.loc[specialist_mask_aligned] = (
+        specialist_pred_aligned.loc[specialist_mask_aligned].astype("float64").values
+    )
+    family_delta_feature = pd.Series(0.0, index=out.index, dtype="float64")
+    family_delta_feature.loc[specialist_mask_aligned] = (
+        specialist_pred_aligned.loc[specialist_mask_aligned].astype("float64").values
+        - reference_pred_aligned.loc[specialist_mask_aligned].astype("float64").values
+    )
+
+    out["family_specialist_pred_feature"] = family_pred_feature.astype("float64").values
+    out["family_specialist_available"] = specialist_mask_aligned.astype("int8").values
+    out["family_specialist_delta_vs_reference"] = family_delta_feature.astype("float64").values
+    return out
+
+
+def _fit_specialist_classifier_bundle(
     *,
     train_csv_path: str | Path,
     preset: str,
@@ -481,12 +517,8 @@ def run_specialist_override_cv(
     random_state: int,
     early_stopping_rounds: int,
     verbose: int,
-    alpha_grid: Sequence[float],
     model_path: str | Path,
-    metrics_path: str | Path,
-    oof_path: str | Path,
 ) -> dict[str, Any]:
-    """Train a specialist model on a hard cohort and scan local override alpha."""
     if folds < 2:
         raise ValueError("folds must be >= 2")
 
@@ -495,11 +527,16 @@ def run_specialist_override_cv(
     specialist_mask = build_specialist_mask(train_df, preset).astype(bool)
 
     reference_by_id = pd.Series(reference_pred, copy=True)
-    reference_pred = train_df[ID_COLUMN].map(reference_by_id)
-    if reference_pred.isna().any():
-        missing_ids = train_df.loc[reference_pred.isna(), ID_COLUMN].head(5).tolist()
+    reference_pred_aligned = train_df[ID_COLUMN].map(reference_by_id)
+    if reference_pred_aligned.isna().any():
+        missing_ids = train_df.loc[reference_pred_aligned.isna(), ID_COLUMN].head(5).tolist()
         raise ValueError(f"reference_pred missing ids from train: {missing_ids}")
-    reference_pred = pd.Series(reference_pred.values, index=x.index, dtype="float64", name="reference_pred")
+    reference_pred_aligned = pd.Series(
+        reference_pred_aligned.values,
+        index=x.index,
+        dtype="float64",
+        name="reference_pred",
+    )
     component_frame = _normalize_reference_component_frame(train_df[ID_COLUMN], reference_component_frame)
     mask_rows = int(specialist_mask.sum())
     if mask_rows < _MIN_SPECIALIST_TRAIN_ROWS:
@@ -538,8 +575,8 @@ def run_specialist_override_cv(
         if y_train.iloc[train_mask].nunique() < 2 or y_valid.iloc[valid_mask].nunique() < 2:
             raise ValueError(f"Fold {fold_number} preset '{preset}' lost one class in train or valid.")
 
-        train_reference = reference_pred.iloc[train_idx]
-        valid_reference = reference_pred.iloc[valid_idx]
+        train_reference = reference_pred_aligned.iloc[train_idx]
+        valid_reference = reference_pred_aligned.iloc[valid_idx]
         train_components = component_frame.iloc[train_idx] if component_frame is not None else None
         valid_components = component_frame.iloc[valid_idx] if component_frame is not None else None
         x_train, train_disagreement_columns = _append_reference_features(
@@ -588,7 +625,7 @@ def run_specialist_override_cv(
             best_iteration = fold_final_iterations - 1
         fold_iterations.append(fold_final_iterations)
 
-        reference_on_mask = reference_pred.iloc[valid_idx].iloc[valid_mask]
+        reference_on_mask = reference_pred_aligned.iloc[valid_idx].iloc[valid_mask]
         reference_auc = binary_auc(y_valid.iloc[valid_mask], reference_on_mask)
         specialist_auc = binary_auc(y_valid.iloc[valid_mask], valid_specialist_pred)
         fold_rows.append(
@@ -608,6 +645,111 @@ def run_specialist_override_cv(
 
     if specialist_pred.loc[specialist_mask].isna().any():
         raise RuntimeError("Specialist OOF predictions contain missing values inside the target cohort.")
+
+    final_iterations = max(int(round(float(np.mean(fold_iterations)))), 1)
+    x_full = _transform_single_with_stateful_blocks(x, stateful_blocks)
+    x_full_local, disagreement_columns_full = _append_reference_features(
+        x_full,
+        reference_pred=reference_pred_aligned,
+        reference_component_frame=component_frame,
+        include_logit=False,
+    )
+    if disagreement_columns and disagreement_columns_full != disagreement_columns:
+        raise RuntimeError("Teacher disagreement feature mismatch between CV folds and full train.")
+    if not disagreement_columns:
+        disagreement_columns = list(disagreement_columns_full)
+    cat_columns = infer_categorical_columns(x_full_local)
+    full_model = fit_full_train(
+        x_train=x_full_local.loc[specialist_mask],
+        y_train=y.loc[specialist_mask],
+        cat_columns=cat_columns,
+        params=CatBoostHyperParams(
+            iterations=final_iterations,
+            learning_rate=params.learning_rate,
+            depth=params.depth,
+            l2_leaf_reg=params.l2_leaf_reg,
+            random_seed=params.random_seed,
+            loss_function=params.loss_function,
+            eval_metric=params.eval_metric,
+        ),
+        verbose=verbose,
+    )
+    save_model(full_model, model_path)
+
+    full_specialist_pred = pd.Series(index=x.index, dtype="float64", name="specialist_pred_full")
+    full_specialist_pred.loc[specialist_mask] = predict_proba(
+        full_model,
+        x_full_local.loc[specialist_mask],
+    ).values
+
+    return {
+        "train_df": train_df,
+        "normalized_blocks": normalized_blocks,
+        "stateful_blocks": stateful_blocks,
+        "x": x,
+        "y": y,
+        "specialist_mask": specialist_mask,
+        "mask_rows": mask_rows,
+        "reference_pred": reference_pred_aligned,
+        "reference_component_frame": component_frame,
+        "specialist_pred": specialist_pred,
+        "specialist_pred_full": full_specialist_pred,
+        "fold_rows": fold_rows,
+        "fold_final_iterations": [int(value) for value in fold_iterations],
+        "final_iterations": int(final_iterations),
+        "teacher_disagreement_columns": disagreement_columns,
+        "specialist_feature_count": int(x_full_local.shape[1]),
+        "specialist_feature_columns": list(x_full_local.columns),
+        "specialist_categorical_columns": cat_columns,
+        "model_path": str(model_path),
+    }
+
+
+def run_specialist_override_cv(
+    *,
+    train_csv_path: str | Path,
+    preset: str,
+    reference_pred: pd.Series,
+    reference_component_frame: pd.DataFrame | None,
+    params: CatBoostHyperParams,
+    feature_blocks: Sequence[str] | None,
+    folds: int,
+    random_state: int,
+    early_stopping_rounds: int,
+    verbose: int,
+    alpha_grid: Sequence[float],
+    model_path: str | Path,
+    metrics_path: str | Path,
+    oof_path: str | Path,
+) -> dict[str, Any]:
+    """Train a specialist model on a hard cohort and scan local override alpha."""
+    bundle = _fit_specialist_classifier_bundle(
+        train_csv_path=train_csv_path,
+        preset=preset,
+        reference_pred=reference_pred,
+        reference_component_frame=reference_component_frame,
+        params=params,
+        feature_blocks=feature_blocks,
+        folds=folds,
+        random_state=random_state,
+        early_stopping_rounds=early_stopping_rounds,
+        verbose=verbose,
+        model_path=model_path,
+    )
+    train_df = bundle["train_df"]
+    normalized_blocks = bundle["normalized_blocks"]
+    y = bundle["y"]
+    specialist_mask = bundle["specialist_mask"]
+    mask_rows = bundle["mask_rows"]
+    reference_pred = bundle["reference_pred"]
+    specialist_pred = bundle["specialist_pred"]
+    fold_rows = bundle["fold_rows"]
+    fold_iterations = bundle["fold_final_iterations"]
+    final_iterations = bundle["final_iterations"]
+    disagreement_columns = bundle["teacher_disagreement_columns"]
+    feature_count = bundle["specialist_feature_count"]
+    feature_columns = bundle["specialist_feature_columns"]
+    cat_columns = bundle["specialist_categorical_columns"]
 
     alpha_scan_rows: list[dict[str, Any]] = []
     for alpha in alpha_grid:
@@ -634,36 +776,6 @@ def run_specialist_override_cv(
         + best_alpha * specialist_pred.loc[specialist_mask]
     )
 
-    final_iterations = max(int(round(float(np.mean(fold_iterations)))), 1)
-    x_full = _transform_single_with_stateful_blocks(x, stateful_blocks)
-    x_full, disagreement_columns_full = _append_reference_features(
-        x_full,
-        reference_pred=reference_pred,
-        reference_component_frame=component_frame,
-        include_logit=False,
-    )
-    if disagreement_columns and disagreement_columns_full != disagreement_columns:
-        raise RuntimeError("Teacher disagreement feature mismatch between CV folds and full train.")
-    if not disagreement_columns:
-        disagreement_columns = list(disagreement_columns_full)
-    cat_columns = infer_categorical_columns(x_full)
-    full_model = fit_full_train(
-        x_train=x_full.loc[specialist_mask],
-        y_train=y.loc[specialist_mask],
-        cat_columns=cat_columns,
-        params=CatBoostHyperParams(
-            iterations=final_iterations,
-            learning_rate=params.learning_rate,
-            depth=params.depth,
-            l2_leaf_reg=params.l2_leaf_reg,
-            random_seed=params.random_seed,
-            loss_function=params.loss_function,
-            eval_metric=params.eval_metric,
-        ),
-        verbose=verbose,
-    )
-    save_model(full_model, model_path)
-
     oof_output = pd.DataFrame(
         {
             ID_COLUMN: train_df[ID_COLUMN].values,
@@ -684,8 +796,8 @@ def run_specialist_override_cv(
         "specialist_rows": mask_rows,
         "specialist_row_share": float(mask_rows / max(len(train_df), 1)),
         "specialist_positive_rate": float(y.loc[specialist_mask].mean()),
-        "feature_count": int(x_full.shape[1]),
-        "feature_columns": list(x_full.columns),
+        "feature_count": int(feature_count),
+        "feature_columns": list(feature_columns),
         "feature_blocks": list(normalized_blocks),
         "teacher_disagreement_columns": disagreement_columns,
         "categorical_columns": cat_columns,
@@ -703,6 +815,215 @@ def run_specialist_override_cv(
         "delta_vs_reference_oof_auc": float(binary_auc(y, candidate_best) - binary_auc(y, reference_pred)),
         "model_path": str(model_path),
         "oof_path": str(oof_path),
+        "target_column": TARGET_COLUMN,
+        "id_column": ID_COLUMN,
+    }
+    write_json(metrics_path, metrics)
+    return metrics
+
+
+def run_family_feature_challenger_cv(
+    *,
+    train_csv_path: str | Path,
+    preset: str,
+    reference_pred: pd.Series,
+    reference_component_frame: pd.DataFrame | None,
+    params: CatBoostHyperParams,
+    feature_blocks: Sequence[str] | None,
+    folds: int,
+    random_state: int,
+    early_stopping_rounds: int,
+    verbose: int,
+    alpha_grid: Sequence[float],
+    model_path: str | Path,
+    metrics_path: str | Path,
+    oof_path: str | Path,
+) -> dict[str, Any]:
+    """Train a family-specific classifier, expose its OOF predictions as global features, and evaluate a challenger."""
+    family_model_path = _derive_family_model_path(model_path)
+    bundle = _fit_specialist_classifier_bundle(
+        train_csv_path=train_csv_path,
+        preset=preset,
+        reference_pred=reference_pred,
+        reference_component_frame=reference_component_frame,
+        params=params,
+        feature_blocks=feature_blocks,
+        folds=folds,
+        random_state=random_state,
+        early_stopping_rounds=early_stopping_rounds,
+        verbose=verbose,
+        model_path=family_model_path,
+    )
+
+    train_df = bundle["train_df"]
+    normalized_blocks = bundle["normalized_blocks"]
+    stateful_blocks = bundle["stateful_blocks"]
+    x = bundle["x"]
+    y = bundle["y"]
+    specialist_mask = bundle["specialist_mask"]
+    mask_rows = bundle["mask_rows"]
+    reference_pred = bundle["reference_pred"]
+    specialist_pred = bundle["specialist_pred"]
+    specialist_pred_full = bundle["specialist_pred_full"]
+
+    splitter = StratifiedKFold(n_splits=folds, shuffle=True, random_state=random_state)
+    challenger_pred = pd.Series(index=x.index, dtype="float64", name="challenger_pred")
+    fold_rows: list[dict[str, Any]] = []
+    fold_iterations: list[int] = []
+
+    for fold_number, (train_idx, valid_idx) in enumerate(splitter.split(x, y), start=1):
+        x_train = x.iloc[train_idx]
+        y_train = y.iloc[train_idx]
+        x_valid = x.iloc[valid_idx]
+        y_valid = y.iloc[valid_idx]
+        x_train, x_valid = _transform_pair_with_stateful_blocks(x_train, x_valid, stateful_blocks)
+        x_train = _append_family_stack_features(
+            x_train,
+            specialist_mask=specialist_mask.iloc[train_idx],
+            specialist_pred=specialist_pred.iloc[train_idx],
+            reference_pred=reference_pred.iloc[train_idx],
+        )
+        x_valid = _append_family_stack_features(
+            x_valid,
+            specialist_mask=specialist_mask.iloc[valid_idx],
+            specialist_pred=specialist_pred.iloc[valid_idx],
+            reference_pred=reference_pred.iloc[valid_idx],
+        )
+        cat_columns = infer_categorical_columns(x_train)
+
+        fold_model = fit_with_validation(
+            x_train=x_train,
+            y_train=y_train,
+            x_valid=x_valid,
+            y_valid=y_valid,
+            cat_columns=cat_columns,
+            params=CatBoostHyperParams(
+                iterations=params.iterations,
+                learning_rate=params.learning_rate,
+                depth=params.depth,
+                l2_leaf_reg=params.l2_leaf_reg,
+                random_seed=random_state,
+                loss_function=params.loss_function,
+                eval_metric=params.eval_metric,
+            ),
+            early_stopping_rounds=early_stopping_rounds,
+            verbose=verbose,
+        )
+
+        fold_pred = predict_proba(fold_model, x_valid)
+        challenger_pred.iloc[valid_idx] = fold_pred.values
+
+        fold_final_iterations = best_iteration_or_default(fold_model, params.iterations)
+        best_iteration = fold_model.get_best_iteration()
+        if best_iteration is None or best_iteration < 0:
+            best_iteration = fold_final_iterations - 1
+        fold_iterations.append(fold_final_iterations)
+        valid_mask = specialist_mask.iloc[valid_idx].to_numpy(dtype=bool)
+        fold_rows.append(
+            {
+                "fold": fold_number,
+                "valid_rows": int(len(valid_idx)),
+                "valid_mask_rows": int(np.sum(valid_mask)),
+                "reference_auc": binary_auc(y_valid, reference_pred.iloc[valid_idx]),
+                "challenger_auc": binary_auc(y_valid, fold_pred),
+                "reference_auc_on_mask": binary_auc(y_valid.iloc[valid_mask], reference_pred.iloc[valid_idx].iloc[valid_mask]),
+                "challenger_auc_on_mask": binary_auc(y_valid.iloc[valid_mask], fold_pred.iloc[valid_mask]),
+                "best_iteration": int(best_iteration),
+                "final_iterations": int(fold_final_iterations),
+            }
+        )
+
+    if challenger_pred.isna().any():
+        raise RuntimeError("Challenger OOF predictions contain missing values.")
+
+    alpha_scan_rows: list[dict[str, Any]] = []
+    for alpha in alpha_grid:
+        alpha_value = float(alpha)
+        candidate = ((1.0 - alpha_value) * reference_pred + alpha_value * challenger_pred).astype("float64")
+        alpha_scan_rows.append(
+            {
+                "alpha": alpha_value,
+                "oof_auc": binary_auc(y, candidate),
+                "oof_auc_on_mask": binary_auc(y.loc[specialist_mask], candidate.loc[specialist_mask]),
+                "reference_auc_on_mask": binary_auc(y.loc[specialist_mask], reference_pred.loc[specialist_mask]),
+            }
+        )
+
+    best_alpha_row = max(alpha_scan_rows, key=lambda row: row["oof_auc"])
+    best_alpha = float(best_alpha_row["alpha"])
+    candidate_best = ((1.0 - best_alpha) * reference_pred + best_alpha * challenger_pred).astype("float64")
+
+    x_full = _transform_single_with_stateful_blocks(x, stateful_blocks)
+    x_full = _append_family_stack_features(
+        x_full,
+        specialist_mask=specialist_mask,
+        specialist_pred=specialist_pred_full,
+        reference_pred=reference_pred,
+    )
+    cat_columns = infer_categorical_columns(x_full)
+    final_iterations = max(int(round(float(np.mean(fold_iterations)))), 1)
+    full_model = fit_full_train(
+        x_train=x_full,
+        y_train=y,
+        cat_columns=cat_columns,
+        params=CatBoostHyperParams(
+            iterations=final_iterations,
+            learning_rate=params.learning_rate,
+            depth=params.depth,
+            l2_leaf_reg=params.l2_leaf_reg,
+            random_seed=params.random_seed,
+            loss_function=params.loss_function,
+            eval_metric=params.eval_metric,
+        ),
+        verbose=verbose,
+    )
+    save_model(full_model, model_path)
+
+    oof_output = pd.DataFrame(
+        {
+            ID_COLUMN: train_df[ID_COLUMN].values,
+            "target": y.astype(int).values,
+            "specialist_mask": specialist_mask.astype("int8").values,
+            "reference_pred": reference_pred.values,
+            "family_specialist_pred": specialist_pred.values,
+            "challenger_pred": challenger_pred.values,
+            "candidate_pred": candidate_best.values,
+        }
+    )
+    oof_out_path = ensure_parent_dir(oof_path)
+    oof_output.to_csv(oof_out_path, index=False)
+
+    metrics: dict[str, Any] = {
+        "preset": preset,
+        "preset_description": SPECIALIST_PRESETS[preset],
+        "approach": FEATURE,
+        "stacking_mode": "single_level_oof",
+        "train_rows": int(len(train_df)),
+        "specialist_rows": mask_rows,
+        "specialist_row_share": float(mask_rows / max(len(train_df), 1)),
+        "specialist_positive_rate": float(y.loc[specialist_mask].mean()),
+        "feature_count": int(x_full.shape[1]),
+        "feature_columns": list(x_full.columns),
+        "feature_blocks": list(normalized_blocks),
+        "teacher_disagreement_columns": bundle["teacher_disagreement_columns"],
+        "categorical_columns": cat_columns,
+        "cv_folds": int(folds),
+        "cv_fold_metrics": fold_rows,
+        "fold_final_iterations": [int(value) for value in fold_iterations],
+        "final_iterations": int(final_iterations),
+        "alpha_scan": alpha_scan_rows,
+        "best_alpha": best_alpha,
+        "reference_oof_auc": binary_auc(y, reference_pred),
+        "reference_oof_auc_on_mask": binary_auc(y.loc[specialist_mask], reference_pred.loc[specialist_mask]),
+        "family_specialist_oof_auc_on_mask": binary_auc(y.loc[specialist_mask], specialist_pred.loc[specialist_mask]),
+        "challenger_oof_auc": binary_auc(y, challenger_pred),
+        "challenger_oof_auc_on_mask": binary_auc(y.loc[specialist_mask], challenger_pred.loc[specialist_mask]),
+        "candidate_oof_auc": binary_auc(y, candidate_best),
+        "candidate_oof_auc_on_mask": binary_auc(y.loc[specialist_mask], candidate_best.loc[specialist_mask]),
+        "delta_vs_reference_oof_auc": float(binary_auc(y, candidate_best) - binary_auc(y, reference_pred)),
+        "global_model_path": str(model_path),
+        "family_model_path": str(family_model_path),
+        "oof_path": str(oof_out_path),
         "target_column": TARGET_COLUMN,
         "id_column": ID_COLUMN,
     }

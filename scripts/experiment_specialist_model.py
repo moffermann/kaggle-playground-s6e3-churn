@@ -18,6 +18,7 @@ from churn_baseline.specialist import (
     build_reference_prediction,
     list_specialist_approaches,
     list_specialist_presets,
+    run_family_feature_challenger_cv,
     run_residual_reranker_cv,
     run_specialist_override_cv,
 )
@@ -76,7 +77,7 @@ def parse_args() -> argparse.Namespace:
         "--approach",
         default="classifier",
         choices=list(list_specialist_approaches()),
-        help="Specialist approach: direct local classifier or residual reranker.",
+        help="Specialist approach: direct local classifier, residual reranker, or family-prediction-as-feature challenger.",
     )
     parser.add_argument(
         "--feature-blocks",
@@ -158,6 +159,23 @@ def main() -> int:
 
     if args.approach == "classifier":
         metrics = run_specialist_override_cv(
+            train_csv_path=args.train_csv,
+            preset=args.preset,
+            reference_pred=reference_pred,
+            reference_component_frame=reference_component_frame,
+            params=params,
+            feature_blocks=feature_blocks,
+            folds=args.folds,
+            random_state=args.random_state,
+            early_stopping_rounds=args.early_stopping_rounds,
+            verbose=args.verbose,
+            alpha_grid=alpha_grid,
+            model_path=args.model_path,
+            metrics_path=args.metrics_path,
+            oof_path=args.oof_path,
+        )
+    elif args.approach == "feature":
+        metrics = run_family_feature_challenger_cv(
             train_csv_path=args.train_csv,
             preset=args.preset,
             reference_pred=reference_pred,

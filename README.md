@@ -287,6 +287,22 @@ Con disagreement del teacher:
 python scripts/experiment_specialist_model.py --approach residual --preset fiber_paperless_early --feature-blocks "H,R,S,V" --include-teacher-disagreement-features
 ```
 
+Formulacion `prediction as feature` para una macrofamilia:
+
+```bash
+python scripts/experiment_specialist_model.py --approach feature --preset ec_mtm_fiber_any --feature-blocks "H,R,S,V" --include-teacher-disagreement-features
+```
+
+En `approach=feature`, el CLI:
+- entrena un especialista local sobre el preset;
+- materializa su score local y lo transforma en features apiladas (`family_specialist_pred_feature`, `family_specialist_available`, `family_specialist_delta_vs_reference`);
+- entrena luego un challenger global con esas features apiladas;
+- guarda dos modelos:
+  - `--model-path`: challenger global
+  - `--model-path` con sufijo `_family<suffix>`: especialista usado para construir la feature
+- el JSON de metricas expone ambos artefactos como `global_model_path` y `family_model_path`
+- el OOF resultante escribe `family_specialist_pred`, `challenger_pred` y `candidate_pred`
+
 Notas para `--include-teacher-disagreement-features`:
 - agrega `teacher_component_*` y estadisticas derivadas (`std`, `range`, `top_gap`, deltas por pares) usando las columnas `pred_*` del OOF de referencia;
 - requiere que los `--oof` del incumbente expongan componentes individuales (`pred_cb`, `pred_xgb`, `pred_lgb`, `pred_r`, `pred_rv`) y no solo la mezcla final;
