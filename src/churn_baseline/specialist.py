@@ -45,6 +45,7 @@ MTM_NOINTERNET_NO_0_6 = "mtm_nointernet_no_0_6"
 EC_MTM_FIBER_PAPERLESS_0_6 = "ec_mtm_fiber_paperless_0_6"
 EC_MTM_FIBER_PAPERLESS_25_48 = "ec_mtm_fiber_paperless_25_48"
 EC_MTM_FIBER_PAPERLESS_ANY = "ec_mtm_fiber_paperless_any"
+EC_MTM_FIBER_ANY = "ec_mtm_fiber_any"
 EC_MTM_DSL_PAPERLESS_0_6 = "ec_mtm_dsl_paperless_0_6"
 EC_MTM_DSL_PAPERLESS_ANY = "ec_mtm_dsl_paperless_any"
 CLASSIFIER = "classifier"
@@ -96,6 +97,9 @@ SPECIALIST_PRESETS: dict[str, str] = {
     ),
     EC_MTM_FIBER_PAPERLESS_ANY: (
         "Electronic check, Month-to-month, Fiber optic, PaperlessBilling=Yes, cualquier tenure."
+    ),
+    EC_MTM_FIBER_ANY: (
+        "Electronic check, Month-to-month, Fiber optic, cualquier PaperlessBilling, cualquier tenure."
     ),
     EC_MTM_DSL_PAPERLESS_0_6: (
         "Electronic check, Month-to-month, DSL, PaperlessBilling=Yes, tenure <= 6."
@@ -249,6 +253,12 @@ def build_specialist_mask(frame: pd.DataFrame, preset: str) -> pd.Series:
             & internet.eq("Fiber optic")
             & payment.eq("Electronic check")
             & paperless.eq("Yes")
+        )
+    if preset == EC_MTM_FIBER_ANY:
+        return (
+            contract.eq("Month-to-month")
+            & internet.eq("Fiber optic")
+            & payment.eq("Electronic check")
         )
     if preset == EC_MTM_DSL_PAPERLESS_0_6:
         return (
