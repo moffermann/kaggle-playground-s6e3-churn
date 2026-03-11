@@ -20,6 +20,7 @@ class CatBoostHyperParams:
     random_seed: int = 42
     loss_function: str = "Logloss"
     eval_metric: str = "AUC"
+    monotone_constraints: Dict[str, int] | None = None
 
     def to_catboost_kwargs(self) -> Dict[str, Any]:
         """Return kwargs accepted by CatBoostClassifier."""

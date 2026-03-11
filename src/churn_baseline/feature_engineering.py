@@ -180,6 +180,38 @@ def _yes_no_flag(series: pd.Series, positive_value: str = "yes") -> pd.Series:
     return series.astype(str).str.lower().eq(positive_value).astype("int8")
 
 
+def ensure_monotonic_features(frame: pd.DataFrame) -> pd.DataFrame:
+    """Add a minimal set of numeric features for monotonic-constraint experiments."""
+    _require_columns(frame, ("tenure", "Contract", "PaymentMethod"), block="MONO")
+    out = frame.copy()
+
+    if "contract_commitment_ordinal" not in out.columns:
+        out["contract_commitment_ordinal"] = out["Contract"].astype(str).map(
+            {
+                "Month-to-month": 1,
+                "One year": 12,
+                "Two year": 24,
+            }
+        ).fillna(1).astype("int16")
+
+    payment_method = out["PaymentMethod"].astype(str)
+    payment_method_norm = payment_method.str.lower()
+    if "is_manual_payment" not in out.columns:
+        out["is_manual_payment"] = (~payment_method_norm.str.contains("automatic", regex=False)).astype("int8")
+
+    if "payment_friction_index" not in out.columns:
+        out["payment_friction_index"] = payment_method.map(
+            {
+                "Credit card (automatic)": 0,
+                "Bank transfer (automatic)": 0,
+                "Electronic check": 2,
+                "Mailed check": 3,
+            }
+        ).fillna(1).astype("int8")
+
+    return out
+
+
 def _group_size(frame: pd.DataFrame, columns: Sequence[str]) -> pd.Series:
     return frame.groupby(list(columns), dropna=False)[columns[0]].transform("size").astype("int32")
 

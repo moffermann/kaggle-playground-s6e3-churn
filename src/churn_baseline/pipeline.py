@@ -19,6 +19,7 @@ from .evaluation import binary_auc
 from .feature_engineering import (
     BLOCK_G,
     apply_coverage_backoff_features,
+    ensure_monotonic_features,
     fit_coverage_backoff_state,
     normalize_feature_blocks,
     partition_feature_blocks,
@@ -125,10 +126,14 @@ def _transform_single_with_stateful_blocks(
 def _prepare_train_matrix(
     train_df: pd.DataFrame,
     feature_blocks: Sequence[str] | None,
+    *,
+    include_monotonic_features: bool = False,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], pd.DataFrame, pd.Series]:
     normalized_blocks = normalize_feature_blocks(feature_blocks)
     stateless_blocks, stateful_blocks = partition_feature_blocks(normalized_blocks)
     x, y = prepare_train_features(train_df, drop_id=True, feature_blocks=stateless_blocks)
+    if include_monotonic_features:
+        x = ensure_monotonic_features(x)
     return normalized_blocks, stateless_blocks, stateful_blocks, x, y
 
 
@@ -138,8 +143,11 @@ def _prepare_test_matrix(
     stateless_blocks: Sequence[str],
     stateful_blocks: Sequence[str],
     train_csv_path: str | Path | None,
+    include_monotonic_features: bool = False,
 ) -> pd.DataFrame:
     x_test = prepare_test_features(test_df, drop_id=True, feature_blocks=stateless_blocks)
+    if include_monotonic_features:
+        x_test = ensure_monotonic_features(x_test)
     if not stateful_blocks:
         return x_test
     if train_csv_path is None:
@@ -148,7 +156,11 @@ def _prepare_test_matrix(
             "Provide train_csv_path when using block G."
         )
     train_df = load_csv(train_csv_path)
-    _, _, _, x_train_base, _ = _prepare_train_matrix(train_df, stateless_blocks)
+    _, _, _, x_train_base, _ = _prepare_train_matrix(
+        train_df,
+        stateless_blocks,
+        include_monotonic_features=include_monotonic_features,
+    )
     _, x_test_stateful = _transform_pair_with_stateful_blocks(x_train_base, x_test, stateful_blocks)
     return x_test_stateful
 
@@ -164,10 +176,15 @@ def train_baseline(
     verbose: int,
     feature_blocks: Sequence[str] | None = None,
     stratify_mode: str = STRATIFY_TARGET,
+    include_monotonic_features: bool = False,
 ) -> Dict[str, Any]:
     """Train holdout+full baseline and save model + metrics."""
     train_df = load_csv(train_csv_path)
-    normalized_blocks, _, stateful_blocks, x, y = _prepare_train_matrix(train_df, feature_blocks)
+    normalized_blocks, _, stateful_blocks, x, y = _prepare_train_matrix(
+        train_df,
+        feature_blocks,
+        include_monotonic_features=include_monotonic_features,
+    )
     normalized_stratify_mode = normalize_stratify_mode(stratify_mode)
     stratify_labels = _build_stratify_labels(
         x,
@@ -209,6 +226,7 @@ def train_baseline(
         random_seed=params.random_seed,
         loss_function=params.loss_function,
         eval_metric=params.eval_metric,
+        monotone_constraints=params.monotone_constraints,
     )
 
     x_full = _transform_single_with_stateful_blocks(x, stateful_blocks)
@@ -226,6 +244,7 @@ def train_baseline(
         "train_rows": int(len(train_df)),
         "feature_count": int(x_full.shape[1]),
         "feature_blocks": list(normalized_blocks),
+        "include_monotonic_features": bool(include_monotonic_features),
         "categorical_columns": full_cat_columns,
         "stratify_mode": normalized_stratify_mode,
         "holdout_auc": holdout_auc,
@@ -280,6 +299,7 @@ def _run_cv_for_seed(
             random_seed=seed,
             loss_function=params.loss_function,
             eval_metric=params.eval_metric,
+            monotone_constraints=params.monotone_constraints,
         )
 
         fold_model = fit_with_validation(
@@ -340,13 +360,18 @@ def train_baseline_cv(
     verbose: int,
     feature_blocks: Sequence[str] | None = None,
     stratify_mode: str = STRATIFY_TARGET,
+    include_monotonic_features: bool = False,
 ) -> Dict[str, Any]:
     """Train baseline with Stratified K-Fold CV, generate OOF and fit final model."""
     if folds < 2:
         raise ValueError("folds must be >= 2")
 
     train_df = load_csv(train_csv_path)
-    normalized_blocks, _, stateful_blocks, x, y = _prepare_train_matrix(train_df, feature_blocks)
+    normalized_blocks, _, stateful_blocks, x, y = _prepare_train_matrix(
+        train_df,
+        feature_blocks,
+        include_monotonic_features=include_monotonic_features,
+    )
     normalized_stratify_mode = normalize_stratify_mode(stratify_mode)
 
     seed_run = _run_cv_for_seed(
@@ -376,6 +401,7 @@ def train_baseline_cv(
         random_seed=params.random_seed,
         loss_function=params.loss_function,
         eval_metric=params.eval_metric,
+        monotone_constraints=params.monotone_constraints,
     )
 
     x_full = _transform_single_with_stateful_blocks(x, stateful_blocks)
@@ -404,6 +430,7 @@ def train_baseline_cv(
         "train_rows": int(len(train_df)),
         "feature_count": int(x_full.shape[1]),
         "feature_blocks": list(normalized_blocks),
+        "include_monotonic_features": bool(include_monotonic_features),
         "categorical_columns": full_cat_columns,
         "stratify_mode": normalized_stratify_mode,
         "cv_folds": int(folds),
@@ -436,6 +463,7 @@ def train_baseline_cv_multiseed(
     verbose: int,
     feature_blocks: Sequence[str] | None = None,
     stratify_mode: str = STRATIFY_TARGET,
+    include_monotonic_features: bool = False,
 ) -> Dict[str, Any]:
     """Train CV baseline across multiple seeds and average OOF predictions."""
     if folds < 2:
@@ -448,7 +476,11 @@ def train_baseline_cv_multiseed(
         raise ValueError("seeds contain duplicates")
 
     train_df = load_csv(train_csv_path)
-    normalized_blocks, _, stateful_blocks, x, y = _prepare_train_matrix(train_df, feature_blocks)
+    normalized_blocks, _, stateful_blocks, x, y = _prepare_train_matrix(
+        train_df,
+        feature_blocks,
+        include_monotonic_features=include_monotonic_features,
+    )
     normalized_stratify_mode = normalize_stratify_mode(stratify_mode)
 
     models_out_dir = Path(models_dir)
@@ -482,6 +514,7 @@ def train_baseline_cv_multiseed(
             random_seed=seed,
             loss_function=params.loss_function,
             eval_metric=params.eval_metric,
+            monotone_constraints=params.monotone_constraints,
         )
 
         model_path = models_out_dir / f"catboost_seed_{seed}.cbm"
@@ -533,6 +566,7 @@ def train_baseline_cv_multiseed(
         "train_rows": int(len(train_df)),
         "feature_count": int(x_full_train.shape[1]),
         "feature_blocks": list(normalized_blocks),
+        "include_monotonic_features": bool(include_monotonic_features),
         "categorical_columns": full_cat_columns,
         "stratify_mode": normalized_stratify_mode,
         "cv_folds": int(folds),
@@ -560,6 +594,7 @@ def make_submission(
     output_csv_path: str | Path,
     feature_blocks: Sequence[str] | None = None,
     train_csv_path: str | Path | None = None,
+    include_monotonic_features: bool = False,
 ) -> Dict[str, Any]:
     """Generate submission CSV using a trained model."""
     test_df = load_csv(test_csv_path)
@@ -574,6 +609,7 @@ def make_submission(
         stateless_blocks=stateless_blocks,
         stateful_blocks=stateful_blocks,
         train_csv_path=train_csv_path,
+        include_monotonic_features=include_monotonic_features,
     )
     model = load_model(model_path)
     predictions = predict_proba(model, x_test)
@@ -587,6 +623,7 @@ def make_submission(
         "output_csv": str(out_path),
         "rows": int(len(submission)),
         "feature_blocks": list(normalized_blocks),
+        "include_monotonic_features": bool(include_monotonic_features),
         "prediction_min": float(submission[TARGET_COLUMN].min()),
         "prediction_max": float(submission[TARGET_COLUMN].max()),
     }
@@ -598,6 +635,7 @@ def make_submission_ensemble(
     output_csv_path: str | Path,
     feature_blocks: Sequence[str] | None = None,
     train_csv_path: str | Path | None = None,
+    include_monotonic_features: bool = False,
 ) -> Dict[str, Any]:
     """Generate submission CSV by averaging predictions from multiple models."""
     if not model_paths:
@@ -615,6 +653,7 @@ def make_submission_ensemble(
         stateless_blocks=stateless_blocks,
         stateful_blocks=stateful_blocks,
         train_csv_path=train_csv_path,
+        include_monotonic_features=include_monotonic_features,
     )
 
     predictions_matrix = []
@@ -634,6 +673,7 @@ def make_submission_ensemble(
         "rows": int(len(submission)),
         "model_count": int(len(model_paths)),
         "feature_blocks": list(normalized_blocks),
+        "include_monotonic_features": bool(include_monotonic_features),
         "prediction_min": float(submission[TARGET_COLUMN].min()),
         "prediction_max": float(submission[TARGET_COLUMN].max()),
     }

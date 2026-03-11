@@ -110,6 +110,24 @@ Notas:
 - `experiment_features.py` compara contra un baseline leyendo `--baseline-metrics-path`.
 - Ese JSON debe contener `ensemble_oof_auc`, `oof_auc` o `holdout_auc`.
 - Si quieres un benchmark distinto, apunta `--baseline-metrics-path` al reporte correcto.
+- Soporta un smoke monotónico experimental con:
+  - `--monotonic-feature-set minimal`
+  - `--monotonic-preset minimal`
+- Si pasas `--monotonic-preset minimal` y dejas `--monotonic-feature-set none`, el CLI activa
+  automaticamente `minimal` para no dejar constraints apuntando a columnas inexistentes.
+- Valores soportados para ambos flags: `none`, `minimal`. Cualquier otro valor falla de forma explicita.
+- Alias aceptados para desactivar: `off`, `false`, `0`.
+- `minimal` agrega solo cuatro señales numéricas estables para este experimento:
+  - `tenure`
+  - `contract_commitment_ordinal`
+  - `is_manual_payment`
+  - `payment_friction_index`
+- Para medir el efecto neto de la restricción, conviene comparar contra el mismo experimento con
+  `--monotonic-feature-set minimal --monotonic-preset none`.
+- Los reportes JSON de `train_baseline*` ahora incluyen `include_monotonic_features`; y
+  `experiment_features.py` agrega `monotonic_feature_set` y `monotonic_preset`.
+- Cuando hay constraints activas, `params_cv` y `params_full_train` también serializan
+  `monotone_constraints` en el JSON.
 
 2e. Ejecutar experimento con priors jerarquicos fold-safe
 
@@ -149,6 +167,9 @@ python scripts/make_submission.py --feature-blocks "G,H,R,V" --train-csv data/ra
 
 Nota:
 - `--train-csv` solo es obligatorio cuando usas bloques fit-aware como `G`.
+- El resultado JSON de `make_submission.py` y `make_submission_ensemble.py` ahora tambien expone
+  `include_monotonic_features` para mantener trazabilidad cuando la inferencia se hace por API
+  usando esa ruta del pipeline.
 
 3b. Generar submission ensemble desde modelos multi-seed
 

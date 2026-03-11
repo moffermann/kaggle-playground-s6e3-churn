@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 import pandas as pd
 from catboost import CatBoostClassifier, Pool
@@ -10,9 +10,36 @@ from catboost import CatBoostClassifier, Pool
 from .config import CatBoostHyperParams
 
 
-def build_model(params: CatBoostHyperParams) -> CatBoostClassifier:
+def _resolve_monotone_constraints(
+    params: CatBoostHyperParams,
+    feature_columns: pd.Index | None,
+) -> dict[int, int] | None:
+    constraints = params.monotone_constraints
+    if not constraints:
+        return None
+    if feature_columns is None:
+        raise ValueError("feature_columns are required to resolve monotone_constraints.")
+
+    missing_columns = [name for name in constraints if name not in feature_columns]
+    if missing_columns:
+        raise ValueError(
+            "Monotone constraints reference features not present in the training matrix: "
+            f"{missing_columns}"
+        )
+
+    return {int(feature_columns.get_loc(name)): int(direction) for name, direction in constraints.items()}
+
+
+def build_model(
+    params: CatBoostHyperParams,
+    *,
+    feature_columns: pd.Index | None = None,
+) -> CatBoostClassifier:
     """Create a CatBoost model from hyperparameters."""
-    return CatBoostClassifier(**params.to_catboost_kwargs())
+    kwargs = params.to_catboost_kwargs()
+    if params.monotone_constraints:
+        kwargs["monotone_constraints"] = _resolve_monotone_constraints(params, feature_columns)
+    return CatBoostClassifier(**kwargs)
 
 
 def fit_with_validation(
@@ -28,7 +55,7 @@ def fit_with_validation(
     sample_weight_valid: Sequence[float] | pd.Series | None = None,
 ) -> CatBoostClassifier:
     """Train CatBoost with validation and early stopping."""
-    model = build_model(params)
+    model = build_model(params, feature_columns=x_train.columns)
     eval_set: tuple[pd.DataFrame, pd.Series] | Pool
     if sample_weight_valid is None:
         eval_set = (x_valid, y_valid)
@@ -61,7 +88,7 @@ def fit_full_train(
     sample_weight: Sequence[float] | pd.Series | None = None,
 ) -> CatBoostClassifier:
     """Train CatBoost on the full train split without eval set."""
-    model = build_model(params)
+    model = build_model(params, feature_columns=x_train.columns)
     model.fit(
         x_train,
         y_train,
