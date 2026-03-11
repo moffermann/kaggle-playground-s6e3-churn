@@ -101,7 +101,7 @@ Con estratificacion compuesta por target + familia:
 python scripts/train_cv_multiseed.py --folds 5 --seeds "42,2024,3407" --feature-blocks "G,H,R,V" --stratify-mode composite
 ```
 
-2d. Ejecutar experimento de feature engineering por bloques (A/B/C/G/H/R/S/V/O/P)
+2d. Ejecutar experimento de feature engineering por bloques (A/B/C/F/G/H/R/S/V/O/P)
 
 ```bash
 python scripts/experiment_features.py --feature-blocks "G,H,R,V" --stratify-mode composite
@@ -111,6 +111,8 @@ Notas:
 - `experiment_features.py` compara contra un baseline leyendo `--baseline-metrics-path`.
 - Ese JSON debe contener `ensemble_oof_auc`, `oof_auc` o `holdout_auc`.
 - Si quieres un benchmark distinto, apunta `--baseline-metrics-path` al reporte correcto.
+- `F` agrega una superficie target-free enfocada en `Electronic check + Month-to-month + Fiber optic`,
+  con buckets de tenure mas finos, ranks y gaps internos dentro de esa macrofamilia.
 - Soporta un smoke monotónico experimental con:
   - `--monotonic-feature-set minimal`
   - `--monotonic-preset minimal`

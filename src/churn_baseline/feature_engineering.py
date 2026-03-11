@@ -13,6 +13,7 @@ import pandas as pd
 BLOCK_A: Final[str] = "A"
 BLOCK_B: Final[str] = "B"
 BLOCK_C: Final[str] = "C"
+BLOCK_F: Final[str] = "F"
 BLOCK_G: Final[str] = "G"
 BLOCK_H: Final[str] = "H"
 BLOCK_R: Final[str] = "R"
@@ -24,6 +25,7 @@ SUPPORTED_BLOCKS: Final[tuple[str, ...]] = (
     BLOCK_A,
     BLOCK_B,
     BLOCK_C,
+    BLOCK_F,
     BLOCK_G,
     BLOCK_H,
     BLOCK_R,
@@ -57,6 +59,9 @@ BLOCK_ALIASES: Final[dict[str, str]] = {
     "BACKOFF": BLOCK_G,
     "SUPPORT": BLOCK_G,
     "FAMILY": BLOCK_G,
+    "SURFACE": BLOCK_F,
+    "FOCUS": BLOCK_F,
+    "EC_SURFACE": BLOCK_F,
     "HARD": BLOCK_H,
     "CONTRAST": BLOCK_H,
     "COHORT": BLOCK_H,
@@ -128,6 +133,9 @@ def apply_feature_engineering(
         if block == BLOCK_C:
             out = _apply_block_c(out)
             continue
+        if block == BLOCK_F:
+            out = _apply_block_f(out)
+            continue
         if block == BLOCK_G:
             raise ValueError(
                 "Feature block G requires train-fitted coverage state; "
@@ -165,6 +173,14 @@ def _build_tenure_bin(tenure_values: pd.Series) -> pd.Series:
         tenure_values,
         bins=[-np.inf, 6, 12, 24, 48, np.inf],
         labels=["0_6", "7_12", "13_24", "25_48", "49_plus"],
+    ).astype(str)
+
+
+def _build_surface_tenure_bin(tenure_values: pd.Series) -> pd.Series:
+    return pd.cut(
+        tenure_values,
+        bins=[-np.inf, 2, 6, 12, 18, 24, 36, 48, 60, np.inf],
+        labels=["0_2", "3_6", "7_12", "13_18", "19_24", "25_36", "37_48", "49_60", "61_plus"],
     ).astype(str)
 
 
@@ -214,6 +230,84 @@ def ensure_monotonic_features(frame: pd.DataFrame) -> pd.DataFrame:
 
 def _group_size(frame: pd.DataFrame, columns: Sequence[str]) -> pd.Series:
     return frame.groupby(list(columns), dropna=False)[columns[0]].transform("size").astype("int32")
+
+
+def _compute_value_primitives(frame: pd.DataFrame, *, block: str) -> dict[str, pd.Series]:
+    service_columns = (
+        "OnlineSecurity",
+        "OnlineBackup",
+        "DeviceProtection",
+        "TechSupport",
+        "StreamingTV",
+        "StreamingMovies",
+    )
+    required = ("tenure", "InternetService", "PhoneService", "MultipleLines", "PaymentMethod", "MonthlyCharges", "TotalCharges")
+    _require_columns(frame, required + service_columns, block=block)
+
+    tenure_values = pd.to_numeric(frame["tenure"], errors="coerce").fillna(0.0)
+    tenure_safe = tenure_values.clip(lower=1.0)
+    monthly_charges = pd.to_numeric(frame["MonthlyCharges"], errors="coerce").fillna(0.0)
+    total_charges = pd.to_numeric(frame["TotalCharges"], errors="coerce").fillna(0.0)
+
+    has_internet = frame["InternetService"].astype(str).str.lower().ne("no").astype("int8")
+    has_phone = _yes_no_flag(frame["PhoneService"])
+    has_multiple_lines = _yes_no_flag(frame["MultipleLines"])
+
+    support_services_count = np.zeros(len(frame), dtype=np.int16)
+    entertainment_services_count = np.zeros(len(frame), dtype=np.int16)
+    for column in ("OnlineSecurity", "OnlineBackup", "DeviceProtection", "TechSupport"):
+        support_services_count += _yes_no_flag(frame[column]).to_numpy(dtype=np.int16)
+    for column in ("StreamingTV", "StreamingMovies"):
+        entertainment_services_count += _yes_no_flag(frame[column]).to_numpy(dtype=np.int16)
+
+    paid_services_count = (
+        has_internet.to_numpy(dtype=np.int16)
+        + has_phone.to_numpy(dtype=np.int16)
+        + has_multiple_lines.to_numpy(dtype=np.int16)
+        + support_services_count
+        + entertainment_services_count
+    ).astype("int16")
+    paid_services_safe = np.clip(paid_services_count, 1, None)
+
+    effective_monthly_charge = (total_charges / tenure_safe).astype("float64")
+    monthly_per_active_service = (monthly_charges / paid_services_safe).astype("float64")
+    payment_friction_index = frame["PaymentMethod"].astype(str).map(
+        {
+            "Credit card (automatic)": 0,
+            "Bank transfer (automatic)": 0,
+            "Electronic check": 2,
+            "Mailed check": 3,
+        }
+    ).fillna(1).astype("int8")
+
+    return {
+        "tenure_values": tenure_values.astype("float64"),
+        "tenure_safe": tenure_safe.astype("float64"),
+        "monthly_charges": monthly_charges.astype("float64"),
+        "total_charges": total_charges.astype("float64"),
+        "has_internet": has_internet.astype("int8"),
+        "support_services_count": pd.Series(support_services_count, index=frame.index, dtype="int16"),
+        "entertainment_services_count": pd.Series(entertainment_services_count, index=frame.index, dtype="int16"),
+        "paid_services_count": pd.Series(paid_services_count, index=frame.index, dtype="int16"),
+        "support_deficit_count": pd.Series(
+            np.where(has_internet.to_numpy(dtype=np.int8) == 1, 4 - support_services_count, 0),
+            index=frame.index,
+            dtype="int16",
+        ),
+        "monthly_per_active_service": pd.Series(monthly_per_active_service, index=frame.index, dtype="float64"),
+        "effective_monthly_charge": pd.Series(effective_monthly_charge, index=frame.index, dtype="float64"),
+        "current_vs_effective_monthly_delta": pd.Series(
+            monthly_charges - effective_monthly_charge,
+            index=frame.index,
+            dtype="float64",
+        ),
+        "current_vs_effective_monthly_ratio": pd.Series(
+            monthly_charges / np.clip(effective_monthly_charge, 1.0, None),
+            index=frame.index,
+            dtype="float64",
+        ),
+        "payment_friction_index": payment_friction_index.astype("int8"),
+    }
 
 
 def _build_segment3_key(frame: pd.DataFrame) -> pd.Series:
@@ -866,58 +960,22 @@ def _apply_block_v(frame: pd.DataFrame) -> pd.DataFrame:
     _require_columns(frame, required + service_columns, block=BLOCK_V)
     out = frame.copy()
 
-    tenure_values = pd.to_numeric(out["tenure"], errors="coerce").fillna(0.0)
-    tenure_safe = tenure_values.clip(lower=1.0)
-    monthly_charges = pd.to_numeric(out["MonthlyCharges"], errors="coerce").fillna(0.0)
-    total_charges = pd.to_numeric(out["TotalCharges"], errors="coerce").fillna(0.0)
+    primitives = _compute_value_primitives(out, block=BLOCK_V)
+    tenure_values = primitives["tenure_values"]
+    monthly_charges = primitives["monthly_charges"]
     if "tenure_bin" not in out.columns:
         out["tenure_bin"] = _build_tenure_bin(tenure_values)
 
-    has_internet = out["InternetService"].astype(str).str.lower().ne("no").astype("int8")
-    has_phone = _yes_no_flag(out["PhoneService"])
-    has_multiple_lines = _yes_no_flag(out["MultipleLines"])
-    support_services_count = np.zeros(len(out), dtype=np.int16)
-    entertainment_services_count = np.zeros(len(out), dtype=np.int16)
-    for column in ("OnlineSecurity", "OnlineBackup", "DeviceProtection", "TechSupport"):
-        support_services_count += _yes_no_flag(out[column]).to_numpy(dtype=np.int16)
-    for column in ("StreamingTV", "StreamingMovies"):
-        entertainment_services_count += _yes_no_flag(out[column]).to_numpy(dtype=np.int16)
-
-    paid_services_count = (
-        has_internet.to_numpy(dtype=np.int16)
-        + has_phone.to_numpy(dtype=np.int16)
-        + has_multiple_lines.to_numpy(dtype=np.int16)
-        + support_services_count
-        + entertainment_services_count
-    ).astype("int16")
-    paid_services_safe = np.clip(paid_services_count, 1, None)
-
-    payment_friction_index = out["PaymentMethod"].astype(str).map(
-        {
-            "Credit card (automatic)": 0,
-            "Bank transfer (automatic)": 0,
-            "Electronic check": 2,
-            "Mailed check": 3,
-        }
-    ).fillna(1).astype("int8")
-
-    out["support_services_count"] = support_services_count.astype("int16")
-    out["entertainment_services_count"] = entertainment_services_count.astype("int16")
-    out["paid_services_count"] = paid_services_count.astype("int16")
-    out["support_deficit_count"] = np.where(
-        has_internet.to_numpy(dtype=np.int8) == 1,
-        4 - support_services_count,
-        0,
-    ).astype("int16")
-    out["monthly_per_active_service"] = (monthly_charges / paid_services_safe).astype("float64")
-    out["effective_monthly_charge"] = (total_charges / tenure_safe).astype("float64")
-    out["current_vs_effective_monthly_delta"] = (
-        monthly_charges - out["effective_monthly_charge"]
-    ).astype("float64")
-    out["current_vs_effective_monthly_ratio"] = (
-        monthly_charges / out["effective_monthly_charge"].clip(lower=1.0)
-    ).astype("float64")
-    out["payment_friction_index"] = payment_friction_index
+    has_internet = primitives["has_internet"]
+    out["support_services_count"] = primitives["support_services_count"].astype("int16")
+    out["entertainment_services_count"] = primitives["entertainment_services_count"].astype("int16")
+    out["paid_services_count"] = primitives["paid_services_count"].astype("int16")
+    out["support_deficit_count"] = primitives["support_deficit_count"].astype("int16")
+    out["monthly_per_active_service"] = primitives["monthly_per_active_service"].astype("float64")
+    out["effective_monthly_charge"] = primitives["effective_monthly_charge"].astype("float64")
+    out["current_vs_effective_monthly_delta"] = primitives["current_vs_effective_monthly_delta"].astype("float64")
+    out["current_vs_effective_monthly_ratio"] = primitives["current_vs_effective_monthly_ratio"].astype("float64")
+    out["payment_friction_index"] = primitives["payment_friction_index"].astype("int8")
     out["is_support_light"] = (
         (has_internet == 1) & (out["support_services_count"] <= 1)
     ).astype("int8")
@@ -974,6 +1032,156 @@ def _apply_block_v(frame: pd.DataFrame) -> pd.DataFrame:
     ).astype("float64")
     out["paid_services_minus_cohort"] = (
         out["paid_services_count"].astype("float64") - cohort_service_median
+    ).astype("float64")
+
+    return out
+
+
+def _apply_block_f(frame: pd.DataFrame) -> pd.DataFrame:
+    service_columns = (
+        "OnlineSecurity",
+        "OnlineBackup",
+        "DeviceProtection",
+        "TechSupport",
+        "StreamingTV",
+        "StreamingMovies",
+    )
+    required = (
+        "PaymentMethod",
+        "Contract",
+        "InternetService",
+        "PaperlessBilling",
+        "tenure",
+        "PhoneService",
+        "MultipleLines",
+        "MonthlyCharges",
+        "TotalCharges",
+    )
+    _require_columns(frame, required + service_columns, block=BLOCK_F)
+    out = frame.copy()
+
+    primitives = _compute_value_primitives(out, block=BLOCK_F)
+    tenure_values = primitives["tenure_values"]
+    monthly_charges = primitives["monthly_charges"]
+    total_charges = primitives["total_charges"]
+    if "tenure_bin" not in out.columns:
+        out["tenure_bin"] = _build_tenure_bin(tenure_values)
+
+    macro_mask = (
+        out["PaymentMethod"].astype(str).eq("Electronic check")
+        & out["Contract"].astype(str).eq("Month-to-month")
+        & out["InternetService"].astype(str).eq("Fiber optic")
+    )
+    fine_tenure_bin = _build_surface_tenure_bin(tenure_values)
+    out["ec_surface_is_family"] = macro_mask.astype("int8")
+    out["ec_surface_is_paperless_family"] = (
+        macro_mask & out["PaperlessBilling"].astype(str).eq("Yes")
+    ).astype("int8")
+    out["ec_surface_tenure_bin_fine"] = pd.Series(
+        np.where(macro_mask, fine_tenure_bin, "other"),
+        index=out.index,
+        dtype="object",
+    ).astype(str)
+    out["ec_surface_segment"] = pd.Series(
+        np.where(
+            macro_mask,
+            out["PaperlessBilling"].astype(str) + "__" + out["ec_surface_tenure_bin_fine"].astype(str),
+            "other",
+        ),
+        index=out.index,
+        dtype="object",
+    ).astype(str)
+
+    out["ec_surface_rows"] = 0
+    out["ec_surface_used_fallback"] = 0
+    out["ec_surface_monthly_minus_median"] = 0.0
+    out["ec_surface_monthly_over_median"] = 1.0
+    out["ec_surface_monthly_rank"] = 0.5
+    out["ec_surface_total_minus_median"] = 0.0
+    out["ec_surface_total_rank"] = 0.5
+    out["ec_surface_mpas_minus_median"] = 0.0
+    out["ec_surface_mpas_rank"] = 0.5
+    out["ec_surface_paid_minus_median"] = 0.0
+    out["ec_surface_support_minus_median"] = 0.0
+    out["ec_surface_delta_minus_median"] = 0.0
+    out["ec_surface_delta_rank"] = 0.5
+    out["ec_surface_pressure_x_support_deficit"] = 0.0
+
+    if not macro_mask.any():
+        return out
+
+    macro_df = pd.DataFrame(
+        {
+            "_paperless": out.loc[macro_mask, "PaperlessBilling"].astype(str),
+            "_fine_tenure": fine_tenure_bin.loc[macro_mask].astype(str),
+            "_coarse_tenure": out.loc[macro_mask, "tenure_bin"].astype(str),
+            "monthly_charges": monthly_charges.loc[macro_mask].astype("float64"),
+            "total_charges": total_charges.loc[macro_mask].astype("float64"),
+            "monthly_per_active_service": primitives["monthly_per_active_service"].loc[macro_mask].astype("float64"),
+            "support_services_count": primitives["support_services_count"].loc[macro_mask].astype("float64"),
+            "paid_services_count": primitives["paid_services_count"].loc[macro_mask].astype("float64"),
+            "current_vs_effective_monthly_delta": primitives["current_vs_effective_monthly_delta"].loc[macro_mask].astype("float64"),
+            "support_deficit_count": primitives["support_deficit_count"].loc[macro_mask].astype("float64"),
+        },
+        index=out.index[macro_mask],
+    )
+    detailed_group = ["_paperless", "_fine_tenure"]
+    fallback_group = ["_paperless", "_coarse_tenure"]
+    detailed_rows = macro_df.groupby(detailed_group, dropna=False)["_paperless"].transform("size")
+    fallback_rows = macro_df.groupby(fallback_group, dropna=False)["_paperless"].transform("size")
+    use_detailed = detailed_rows >= 75
+
+    feature_specs = (
+        ("monthly_charges", "monthly"),
+        ("total_charges", "total"),
+        ("monthly_per_active_service", "mpas"),
+        ("support_services_count", "support"),
+        ("paid_services_count", "paid"),
+        ("current_vs_effective_monthly_delta", "delta"),
+    )
+
+    macro_features: dict[str, pd.Series] = {
+        "rows": pd.Series(np.where(use_detailed, detailed_rows, fallback_rows), index=macro_df.index, dtype="float64"),
+        "used_fallback": pd.Series((~use_detailed).astype("int8"), index=macro_df.index, dtype="int8"),
+    }
+    for source_column, prefix in feature_specs:
+        detailed_median = macro_df.groupby(detailed_group, dropna=False)[source_column].transform("median")
+        fallback_median = macro_df.groupby(fallback_group, dropna=False)[source_column].transform("median")
+        detailed_rank = macro_df.groupby(detailed_group, dropna=False)[source_column].rank(method="average", pct=True)
+        fallback_rank = macro_df.groupby(fallback_group, dropna=False)[source_column].rank(method="average", pct=True)
+
+        cohort_median = pd.Series(
+            np.where(use_detailed, detailed_median, fallback_median),
+            index=macro_df.index,
+            dtype="float64",
+        )
+        cohort_rank = pd.Series(
+            np.where(use_detailed, detailed_rank, fallback_rank),
+            index=macro_df.index,
+            dtype="float64",
+        )
+        macro_features[f"{prefix}_minus_median"] = (macro_df[source_column] - cohort_median).astype("float64")
+        macro_features[f"{prefix}_rank"] = cohort_rank.astype("float64")
+        if prefix == "monthly":
+            macro_features["monthly_over_median"] = (
+                macro_df[source_column] / cohort_median.clip(lower=1.0)
+            ).astype("float64")
+
+    out.loc[macro_df.index, "ec_surface_rows"] = macro_features["rows"].astype("int32")
+    out.loc[macro_df.index, "ec_surface_used_fallback"] = macro_features["used_fallback"].astype("int8")
+    out.loc[macro_df.index, "ec_surface_monthly_minus_median"] = macro_features["monthly_minus_median"].astype("float64")
+    out.loc[macro_df.index, "ec_surface_monthly_over_median"] = macro_features["monthly_over_median"].astype("float64")
+    out.loc[macro_df.index, "ec_surface_monthly_rank"] = macro_features["monthly_rank"].astype("float64")
+    out.loc[macro_df.index, "ec_surface_total_minus_median"] = macro_features["total_minus_median"].astype("float64")
+    out.loc[macro_df.index, "ec_surface_total_rank"] = macro_features["total_rank"].astype("float64")
+    out.loc[macro_df.index, "ec_surface_mpas_minus_median"] = macro_features["mpas_minus_median"].astype("float64")
+    out.loc[macro_df.index, "ec_surface_mpas_rank"] = macro_features["mpas_rank"].astype("float64")
+    out.loc[macro_df.index, "ec_surface_paid_minus_median"] = macro_features["paid_minus_median"].astype("float64")
+    out.loc[macro_df.index, "ec_surface_support_minus_median"] = macro_features["support_minus_median"].astype("float64")
+    out.loc[macro_df.index, "ec_surface_delta_minus_median"] = macro_features["delta_minus_median"].astype("float64")
+    out.loc[macro_df.index, "ec_surface_delta_rank"] = macro_features["delta_rank"].astype("float64")
+    out.loc[macro_df.index, "ec_surface_pressure_x_support_deficit"] = (
+        macro_features["monthly_over_median"] * macro_df["support_deficit_count"]
     ).astype("float64")
 
     return out

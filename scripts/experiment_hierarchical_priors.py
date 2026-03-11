@@ -74,7 +74,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--base-feature-blocks",
         default="none",
-        help="Optional base stateless blocks before priors (A,B,C,H,R,S,V,O,P or none).",
+        help="Optional base stateless blocks before priors (A,B,C,F,H,R,S,V,O,P or none).",
     )
     parser.add_argument(
         "--feature-mode",

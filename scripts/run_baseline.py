@@ -27,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--feature-blocks",
         default="none",
-        help="Optional feature blocks (A,B,C,G,H,R,S,V,O,P) or none.",
+        help="Optional feature blocks (A,B,C,F,G,H,R,S,V,O,P) or none.",
     )
     parser.add_argument(
         "--stratify-mode",
