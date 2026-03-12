@@ -32,6 +32,7 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |   |-- analyze_train_test_drift.py
 |   |-- analyze_error_by_class.py
 |   |-- analyze_family_generalization.py
+|   |-- evaluate_validation_protocol.py
 |   |-- evaluate_ensemble_robustness.py
 |   |-- experiment_fm_probe.py
 |   |-- experiment_hierarchical_priors.py
@@ -252,6 +253,35 @@ Notas:
   `min_test_rows`, y luego se evalua solo el `top-k` ordenado por `reference_logloss_contribution`.
 - En el CSV, las columnas `lofo_*` y `generalization_gap_*` quedan en `NaN` para familias que no
   entraron en ese rerun LOFO.
+
+3g3. Evaluar un candidato OOF bajo el protocolo de `validation reset`
+
+```bash
+python scripts/evaluate_validation_protocol.py --stage smoke --analysis-oof artifacts/reports/family_gated_ec_mtm_fiber_any_teacher_smoke_oof.csv --target-family-level segment3 --target-family-value "Electronic check__Month-to-month__Fiber optic"
+```
+
+Notas:
+- `--analysis-oof` acepta un CSV ya armado con columnas `id`, `target`, `reference_pred` y `candidate_pred`.
+- Si no tienes ese artefacto, puedes usar `--candidate-oof <path>[#<prediction_column>]` y reconstruir la referencia con:
+  - `--reference-oof <path>[#<prediction_column>]`, o
+  - `--oof ...` + `--reference-weights-json`
+- Defaults importantes:
+  - `--train-csv data/raw/train.csv`
+  - `--test-csv data/raw/test.csv`
+  - `--reference-weights-json artifacts/reports/submission_candidate_cb5_xgb3_lgb_r_rvhi_weights.json`
+  - si no pasas `--oof`, el script usa el teacher blend por defecto `cb+xgb+lgb+r+rv`
+  - `--out-json artifacts/reports/validation_protocol_verdict.json`
+- El JSON de salida deja:
+  - metricas globales Split A
+  - checks por macrofamilia dominante y top-3 por dano
+  - checks adicionales por familia objetivo solo si pasas `--target-family-value`
+  - guardrail de familia hermana solo en `segment5` y solo para `submission`; si no pasas `--sister-family-value`, el script intenta derivarla automaticamente desde la clave `segment5`
+  - veredicto agregado `PASS/WARN/FAIL`
+- Para `midcap` o `submission`, debes pasar tambien:
+  - `--candidate-metrics-json`
+  - `--reference-metrics-json`
+- Sin esos JSON el script igual corre, pero el check `midcap_cv_std` queda en `FAIL`.
+- Para `submission`, el gate exige `--submission-csv` para trazar el artefacto final.
 
 3h. Ejecutar experimento de especialista local sobre el incumbente
 
