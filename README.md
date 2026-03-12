@@ -289,6 +289,37 @@ Notas:
 - El conflicto `coarse` solo cuenta grupos chicos (`--max-near-duplicate-group-size`, default `5`, minimo `2`) para no confundir cohortes grandes con near-duplicates.
 - El JSON resume concentracion por `segment3`, `segment5` y por la macrofamilia dominante `Electronic check / Month-to-month / Fiber optic`.
 
+3g2c. Probar mitigacion minima de near-duplicates directamente contra `v3`
+
+```bash
+python scripts/experiment_noise_mitigation.py \
+  --mode downweight \
+  --feature-blocks R,V \
+  --label noise_mitigation_downweight_smoke
+```
+
+Notas:
+- El experimento entrena un challenger CatBoost en smoke y lo compara directamente contra `v3`.
+- `--mode` soporta `downweight` o `drop`.
+- La regla se deriva solo sobre el fold de train y marca filas minoritarias dentro de grupos `coarse` chicos y mixtos.
+- La firma `coarse` usa:
+  - categoricas crudas normalizadas (`gender`, `SeniorCitizen`, `Partner`, `Dependents`, `PhoneService`, `MultipleLines`, `InternetService`, `OnlineSecurity`, `OnlineBackup`, `DeviceProtection`, `TechSupport`, `StreamingTV`, `StreamingMovies`, `Contract`, `PaperlessBilling`, `PaymentMethod`)
+  - `tenure` exacto
+  - `MonthlyCharges` redondeado al entero mas cercano
+  - `TotalCharges` redondeado a decenas
+  - `segment3` y `segment5`
+- Por default restringe la mitigacion a la macrofamilia dominante `Electronic check / Month-to-month / Fiber optic`; usa `--no-dominant-only` para desactivarlo.
+- `--suspect-weight` solo aplica en `downweight`.
+- `--min-group-size`, `--max-group-size` y `--majority-share-min` controlan la agresividad de la regla.
+- El script siempre construye `analysis_oof` y corre el gate directo contra `v3`.
+- Los artefactos principales son:
+  - `<label>_metrics.json`
+  - `<label>_oof.csv`
+  - `<label>_analysis_oof.csv`
+  - `<label>_candidate_metrics.json`
+  - `<label>_reference_v3_metrics.json`
+  - `validation_protocol_<label>_vs_v3_smoke.json`
+
 3g3. Evaluar un candidato OOF bajo el protocolo de `validation reset`
 
 ```bash
