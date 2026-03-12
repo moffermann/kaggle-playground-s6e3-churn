@@ -72,6 +72,7 @@ Fecha: `2026-03-11`
    - reforzar validacion realista por familia/cohorte
    - medir mejor riesgo `CV -> public/private`
    - usar eso como filtro antes de volver a entrenar modelos nuevos
+   - protocolo formal: [validation-reset-protocol.md](./validation-reset-protocol.md)
 
 2. Solo despues del reset:
    - probar una familia de modelo realmente distinta o una representacion nueva
