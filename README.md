@@ -22,6 +22,7 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |       |-- kaggle_api.py
 |       |-- linear_probe.py
 |       |-- mlp_probe.py
+|       |-- ngram_xgb.py
 |       |-- modeling.py
 |       |-- pseudo_labeling.py
 |       |-- specialist.py
@@ -39,6 +40,7 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |   |-- experiment_hierarchical_priors.py
 |   |-- experiment_linear_probe.py
 |   |-- experiment_mlp_probe.py
+|   |-- run_ngram_xgb.py
 |   |-- experiment_pseudo_label_family.py
 |   |-- experiment_local_calibrator.py
 |   |-- experiment_specialist_model.py
@@ -324,6 +326,39 @@ Notas:
   - metrics JSON comparables (`cv_std_auc` incluido)
   - veredicto del protocolo aplicado directamente contra `v3`
   - summary JSON con el resumen del veredicto y los paths generados
+
+3g5. Correr la linea minima `bi-gram + target encoding + XGBoost`
+
+```bash
+python scripts/run_ngram_xgb.py \
+  --train-csv data/raw/train.csv \
+  --test-csv data/raw/test.csv \
+  --original-csv artifacts/external/blastchar_telco/WA_Fn-UseC_-Telco-Customer-Churn.csv \
+  --folds 2 \
+  --inner-folds 3 \
+  --metrics-path artifacts/reports/ngram_te_xgb_smoke_metrics.json \
+  --oof-path artifacts/reports/ngram_te_xgb_smoke_oof.csv \
+  --reference-v3-oof artifacts/reports/validation_protocol_v3_chain_oof.csv \
+  --analysis-oof-path artifacts/reports/ngram_te_xgb_smoke_analysis_oof.csv
+```
+
+Notas:
+- La linea vive separada del pipeline principal en `src/churn_baseline/ngram_xgb.py`.
+- Usa:
+  - numericas crudas (`SeniorCitizen`, `tenure`, `MonthlyCharges`, `TotalCharges`)
+  - target encoding fold-safe para categoricas simples
+  - bi-grams sobre `Contract`, `InternetService`, `PaymentMethod`, `OnlineSecurity`, `TechSupport`, `PaperlessBilling`
+- `--include-trigrams` agrega tri-grams sobre las primeras 4 categoricas base.
+- `--original-csv` es opcional; si se pasa, el CSV original se usa solo como apoyo para los mapas de target encoding.
+  Debe incluir la columna objetivo `Churn`; si no existe, el CLI falla de forma explicita.
+- El experimento elimina filas del dataset original que coincidan exactamente con filas de `train/test` para evitar solapamientos triviales.
+- `--reference-v3-oof` y `--analysis-oof-path` tambien son opcionales; si ambos estan presentes, `--reference-v3-oof`
+  debe apuntar a un CSV con columnas `id`, `target` y `candidate_pred`. El CLI deja listo un CSV con:
+  - `id`
+  - `target`
+  - `reference_pred`
+  - `candidate_pred`
+  que se puede pasar directo a `evaluate_validation_protocol.py`.
 
 3h. Ejecutar experimento de especialista local sobre el incumbente
 
