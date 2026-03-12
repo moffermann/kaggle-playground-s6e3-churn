@@ -8,6 +8,9 @@ Fecha: `2026-03-11`
 - Kaggle `ref`: `50828079`
 - `public score`: `0.91421`
 - Regla base: no reemplazar `v3` con candidatos cuyo `delta local` en `OOF AUC` contra el incumbent sea `< 1e-05`, salvo fix de paridad o senal materialmente nueva.
+- Terminologia corta:
+  - `R` y `RV`: ver [README.md](../README.md)
+  - `EC / MTM / Fiber`: macrofamilia `Electronic check / Month-to-month / Fiber optic`
 
 ## Lo Que Si Funciono
 
@@ -39,6 +42,8 @@ Fecha: `2026-03-11`
   - `classifier`
   - `feature`
   - `gated`
+- `bi/tri-gram TE + XGBoost`
+- `GNN starter + ANN graph`
 
 ## Lo Que Si Aprendimos
 
