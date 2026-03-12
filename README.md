@@ -17,6 +17,7 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |       |-- diagnostics.py
 |       |-- feature_engineering.py
 |       |-- fm_probe.py
+|       |-- gnn_probe.py
 |       |-- artifacts.py
 |       |-- evaluation.py
 |       |-- kaggle_api.py
@@ -37,6 +38,7 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |   |-- evaluate_validation_protocol.py
 |   |-- evaluate_ensemble_robustness.py
 |   |-- experiment_fm_probe.py
+|   |-- experiment_gnn_probe.py
 |   |-- experiment_hierarchical_priors.py
 |   |-- experiment_linear_probe.py
 |   |-- experiment_mlp_probe.py
@@ -359,6 +361,44 @@ Notas:
   - `reference_pred`
   - `candidate_pred`
   que se puede pasar directo a `evaluate_validation_protocol.py`.
+
+3g6. Correr el smoke minimo `GraphSAGE + ANN graph`
+
+```bash
+python scripts/experiment_gnn_probe.py \
+  --train-csv data/raw/train.csv \
+  --test-csv data/raw/test.csv \
+  --folds 2 \
+  --device auto \
+  --hidden-dim 64 \
+  --epochs 12 \
+  --patience 4 \
+  --k-neighbors 8 \
+  --metrics-path artifacts/reports/gnn_probe_smoke_v2_metrics.json \
+  --oof-path artifacts/reports/gnn_probe_smoke_v2_oof.csv \
+  --reference-v3-oof artifacts/reports/validation_protocol_v3_chain_oof.csv \
+  --analysis-oof-path artifacts/reports/gnn_probe_smoke_v2_analysis_oof.csv
+```
+
+Notas:
+- La linea vive separada del pipeline principal en `src/churn_baseline/gnn_probe.py`.
+- Es una adaptacion minima del notebook externo de GNN:
+  - `torch-geometric` para `GraphSAGE`
+  - `pynndescent` para construir un grafo ANN sobre `train+test`
+  - sin RAPIDS (`cuml/cupy`) y sin hill climbing en esta primera pasada
+- Usa solo:
+  - 16 categoricas base como embeddings de nodo
+  - 3 numericas (`tenure`, `MonthlyCharges`, `TotalCharges`) estandarizadas
+  - grafo KNN sobre `OHE(base_cats) + numericas escaladas`
+- El entrenamiento es transductivo:
+  - el grafo se construye sobre `train+test`
+  - la perdida de cada fold usa solo los nodos de train del fold
+- `--reference-v3-oof` y `--analysis-oof-path` son opcionales; si ambos estan presentes, el CLI deja listo un CSV con:
+  - `id`
+  - `target`
+  - `reference_pred`
+  - `candidate_pred`
+  para pasarlo directo a `evaluate_validation_protocol.py`.
 
 3h. Ejecutar experimento de especialista local sobre el incumbente
 
