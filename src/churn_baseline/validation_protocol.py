@@ -403,14 +403,12 @@ def evaluate_validation_protocol(
     ].copy()
     micro_only = False
     if not positive_improvements.empty:
-        micro_only = bool(
-            (
-                positive_improvements["train_rows"].astype(int) < MIN_MICRO_TRAIN_ROWS
-            )
-            | (
-                positive_improvements["test_rows"].fillna(0).astype(int) < MIN_MICRO_TEST_ROWS
-            )
-        ).all()
+        micro_mask = (
+            positive_improvements["train_rows"].astype(int) < MIN_MICRO_TRAIN_ROWS
+        ) | (
+            positive_improvements["test_rows"].fillna(0).astype(int) < MIN_MICRO_TEST_ROWS
+        )
+        micro_only = bool(micro_mask.all())
     checks.append(
         make_check(
             "micro_family_dependence",
