@@ -15,6 +15,7 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |       |-- config.py
 |       |-- data.py
 |       |-- diagnostics.py
+|       |-- noise_audit.py
 |       |-- feature_engineering.py
 |       |-- fm_probe.py
 |       |-- gnn_probe.py
@@ -34,6 +35,7 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |   |-- analyze_train_test_drift.py
 |   |-- analyze_error_by_class.py
 |   |-- analyze_family_generalization.py
+|   |-- analyze_label_noise.py
 |   |-- evaluate_against_v3.py
 |   |-- evaluate_validation_protocol.py
 |   |-- evaluate_ensemble_robustness.py
@@ -258,6 +260,34 @@ Notas:
   `min_test_rows`, y luego se evalua solo el `top-k` ordenado por `reference_logloss_contribution`.
 - En el CSV, las columnas `lofo_*` y `generalization_gap_*` quedan en `NaN` para familias que no
   entraron en ese rerun LOFO.
+
+3g2b. Auditar `label noise`, `near-duplicates` y ejemplos duros contra `v3`
+
+```bash
+python scripts/analyze_label_noise.py \
+  --train-csv data/raw/train.csv \
+  --v3-oof artifacts/reports/validation_protocol_v3_chain_oof.csv#candidate_pred \
+  --out-json artifacts/reports/label_noise_audit_summary.json \
+  --out-rows-csv artifacts/reports/label_noise_audit_suspicious_rows.csv \
+  --out-duplicate-csv artifacts/reports/label_noise_audit_duplicate_groups.csv
+```
+
+Notas:
+- `--train-csv` default: `data/raw/train.csv`.
+- `--v3-oof` debe apuntar a un CSV con `id`, `target` y una columna de prediccion continua; el sufijo `#candidate_pred` indica explicitamente esa columna.
+- Usa `v3` como referencia fija y falla si el OOF no cubre exactamente `train.csv`.
+- Si estan disponibles los OOF `cb/xgb/lgb/r/rv`, agrega desacuerdo del teacher:
+  - `teacher_mean`
+  - `teacher_std`
+  - `teacher_range`
+  - `teacher_unanimous_side`
+- Distingue tres clases diagnosticas:
+  - `label_noise_candidate`
+  - `near_duplicate_conflict`
+  - `hard_example_stable`
+- El CSV de grupos de duplicados reporta firmas `exact` y `coarse`.
+- El conflicto `coarse` solo cuenta grupos chicos (`--max-near-duplicate-group-size`, default `5`, minimo `2`) para no confundir cohortes grandes con near-duplicates.
+- El JSON resume concentracion por `segment3`, `segment5` y por la macrofamilia dominante `Electronic check / Month-to-month / Fiber optic`.
 
 3g3. Evaluar un candidato OOF bajo el protocolo de `validation reset`
 
