@@ -32,6 +32,7 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |   |-- analyze_train_test_drift.py
 |   |-- analyze_error_by_class.py
 |   |-- analyze_family_generalization.py
+|   |-- evaluate_against_v3.py
 |   |-- evaluate_validation_protocol.py
 |   |-- evaluate_ensemble_robustness.py
 |   |-- experiment_fm_probe.py
@@ -282,6 +283,47 @@ Notas:
   - `--reference-metrics-json`
 - Sin esos JSON el script igual corre, pero el check `midcap_cv_std` queda en `FAIL`.
 - Para `submission`, el gate exige `--submission-csv` para trazar el artefacto final.
+
+3g4. Comparar una chain challenger directamente contra `v3`
+
+```bash
+python scripts/evaluate_against_v3.py --stage midcap --label "ec_any_best" --candidate-order "early_all_internet,ec_mtm_fiber_paperless_any,fiber_paperless_early" --candidate-step "ec_mtm_fiber_paperless_any|artifacts/reports/residual_reranker_ec_mtm_fiber_paperless_any_teacher_midcap_oof.csv"
+```
+
+Notas:
+- Este CLI existe para no volver a comparar challengers solo contra `rvblend` cuando el incumbent operativo ya es `v3`.
+- Usa `v3` como referencia fija:
+  - `early_all_internet`
+  - `fiber_paperless_early`
+  - `late_mtm_fiber`
+  - `late_mtm_fiber_paperless`
+- Los OOF por defecto de `v3` son los artefactos `midcap`; `--stage` cambia los thresholds del protocolo, no esos paths por defecto.
+- `--candidate-order` define la chain challenger completa; puede reutilizar pasos de `v3`, omitirlos o sobrescribirlos.
+- `--candidate-step` usa formato `<preset>|<oof_path>` y solo hace falta para pasos que no pertenezcan al set fijo de `v3` o que quieras reemplazar.
+- Los OOF usados por defecto para los pasos fijos de `v3` se leen desde `artifacts/reports`:
+  - `residual_reranker_early_all_internet_midcap_oof.csv`
+  - `residual_reranker_fiber_paperless_early_teacher_midcap_oof.csv`
+  - `residual_reranker_late_mtm_fiber_teacher_midcap_oof.csv`
+  - `residual_reranker_late_mtm_fiber_paperless_teacher_midcap_oof.csv`
+- Todos los OOF de pasos deben contener estas columnas:
+  - `id`
+  - `oof_target`
+  - `specialist_mask`
+  - `candidate_pred`
+  - `reference_pred`
+- Todos los pasos deben compartir exactamente:
+  - los mismos `id`
+  - el mismo `oof_target`
+  - el mismo `reference_pred` base dentro de una tolerancia numérica pequeña
+- Si sobrescribes un paso existente de `v3`, el challenger cambia, pero la referencia `v3` sigue usando los OOF fijos originales.
+- La union de `id` en los OOF debe cubrir exactamente `train.csv`; el script falla si detecta cobertura parcial.
+- El script deja:
+  - OOF de referencia `v3`
+  - OOF del challenger
+  - analysis OOF `candidate vs v3`
+  - metrics JSON comparables (`cv_std_auc` incluido)
+  - veredicto del protocolo aplicado directamente contra `v3`
+  - summary JSON con el resumen del veredicto y los paths generados
 
 3h. Ejecutar experimento de especialista local sobre el incumbente
 
