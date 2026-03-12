@@ -62,6 +62,20 @@ Fecha: `2026-03-12`
   - `soft`
   - `soft + confidence weighting`
 
+### Intervenciones Data-Centric
+
+- Auditoria de `label noise`:
+  - util como diagnostico
+  - no hay evidencia para filtrar globalmente
+- Mitigacion minima de `near-duplicate conflicts`:
+  - `downweight` local por fold
+  - `drop` local por fold
+  - ambas fallan directamente contra `v3`
+- Reglas cerradas:
+  - no hacer drops masivos
+  - no bajar peso por sospecha global
+  - no tocar cohortes grandes completas por auditoria sola
+
 ### Familias De Modelo Alternativas
 
 - `linear probe`
@@ -88,23 +102,22 @@ No basta con:
 
 ## ROI Restante
 
-La evidencia acumulada apunta a que el ROI restante ya no esta en otra familia de modelo.
+La evidencia acumulada apunta a que el ROI restante ya no esta en mas filtros sobre filas sospechosas ni en otra familia de modelo cercana al stack actual.
 
-Las apuestas que siguen vivas son data-centric:
+Las apuestas que siguen vivas son:
 
-1. auditoria de label noise
-2. auditoria de near-duplicates
-3. identificacion de ejemplos duros/inestables por fold y por familia
-4. stress tests de generalizacion por familia dominante
+1. uso supervisado de fuente externa alineada al dominio (`telco-customer-churn`) como senal transferida
+2. identificacion de ejemplos duros/inestables por fold y por familia, pero solo como diagnostico
+3. stress tests de generalizacion por familia dominante
 
 ## Proxima Hipotesis
 
 La siguiente linea recomendada es:
 
-- `label noise and near-duplicate audit`
+- `external telco transfer feature`
 
 Objetivo:
 
-- detectar filas posiblemente mal rotuladas, casi duplicadas o structuralmente ambiguas
-- medir si estan concentradas en la macrofamilia dominante
-- decidir si conviene filtrar, bajar peso o separar esos casos antes de entrenar otra vez
+- entrenar un teacher externo sobre el dataset original `telco-customer-churn`
+- proyectar esa senal sobre `train/test` de la competencia
+- medir si aporta valor frente a `v3` como feature o como miembro complementario

@@ -1,8 +1,11 @@
 # Estado del proyecto
 
 Fecha de inicializacion: `2026-03-04`
+Ultima actualizacion: `2026-03-12`
 
-Estado operativo actual: ver [phase-reset-summary.md](./phase-reset-summary.md)
+Estado operativo actual:
+- resumen ejecutivo: [phase-reset-summary.md](./phase-reset-summary.md)
+- ledger de familias/modelos: [model-family-ledger.md](./model-family-ledger.md)
 
 ## Hecho
 
@@ -24,3 +27,5 @@ Estado operativo actual: ver [phase-reset-summary.md](./phase-reset-summary.md)
   - `v3`
   - Kaggle `ref 50828079`
   - `public score = 0.91421`
+- La linea data-centric de `label noise / near-duplicates` quedo cerrada como `NO-GO` para mitigacion directa.
+- Siguiente direccion recomendada: senal supervisada externa desde `telco-customer-churn`.

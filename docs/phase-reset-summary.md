@@ -1,6 +1,7 @@
 # Resumen De Reset De Fase
 
 Fecha: `2026-03-11`
+Ultima actualizacion: `2026-03-12`
 
 ## Incumbent
 
@@ -23,6 +24,9 @@ Fecha: `2026-03-11`
 
 ## Lo Que Ya Esta Cerrado Como NO-GO
 
+Lista exhaustiva y mantenida en:
+- [model-family-ledger.md](./model-family-ledger.md)
+
 - Pseudo-labeling por familia:
   - `hard`
   - `soft`
@@ -44,11 +48,18 @@ Fecha: `2026-03-11`
   - `gated`
 - `bi/tri-gram TE + XGBoost`
 - `GNN starter + ANN graph`
+- Intervenciones data-centric minimas sobre filas sospechosas:
+  - `near-duplicate downweight`
+  - `near-duplicate drop`
 
 ## Lo Que Si Aprendimos
 
 - La macrofamilia dominante del problema es:
   - `Electronic check / Month-to-month / Fiber optic`
+- La auditoria data-centric sirve para orientar investigacion:
+  - `label noise` puro parece minoritario
+  - la mayor parte de la sospecha se concentra en `near-duplicates / cohortes casi repetidas`
+  - pero mitigar eso de forma minima dano el ranking frente a `v3`
 - El cuello de botella no parece ser:
   - falta de otro seed
   - otro blend scan
@@ -80,11 +91,13 @@ Fecha: `2026-03-11`
    - protocolo formal: [validation-reset-protocol.md](./validation-reset-protocol.md)
 
 2. Solo despues del reset:
-   - probar una familia de modelo realmente distinta o una representacion nueva
+   - probar una fuente de senal realmente distinta o una representacion nueva
    - no otra variante de CatBoost local sobre la misma macrofamilia
 
 ## Decision
 
 - `v3` sigue siendo el incumbent.
+- El `validation reset` ya quedo implementado y es prerrequisito cumplido.
 - La siguiente apuesta no debe ser otro experimento pequeno sobre `EC / MTM / Fiber`.
 - La siguiente apuesta debe empezar por evaluacion y criterio de promocion, no por mas CPU.
+- La siguiente hipotesis recomendada es usar el dataset original `telco-customer-churn` como fuente supervisada externa.
