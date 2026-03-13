@@ -522,6 +522,40 @@ Notas:
   - antes de abrir otra hipotesis sobre la familia residual
   - para distinguir entre edge real de la cadena y complejidad accidental
 
+3g4aa. Destilar el delta total de `v3` sobre la referencia base
+
+```bash
+python scripts/experiment_residual_distillation.py \
+  --label residual_distillation_smoke \
+  --feature-blocks H,R,S,V \
+  --alpha-grid 0.25,0.5,1.0,2.0,4.0
+```
+
+Notas:
+- Esta linea aprende un solo target de regresion:
+  - `distill_target = v3_pred - base_reference_pred`
+- No reentrena la jerarquia residual original ni genera submissions.
+- Si corres el CLI tal como esta, si usa `test.csv` para el gate del protocolo.
+- Requiere los OOF `midcap` de la cadena `v3` ya presentes en `artifacts/reports/`:
+  - `residual_reranker_early_all_internet_midcap_oof.csv`
+  - `residual_reranker_fiber_paperless_early_teacher_midcap_oof.csv`
+  - `residual_reranker_late_mtm_fiber_teacher_midcap_oof.csv`
+  - `residual_reranker_late_mtm_fiber_paperless_teacher_midcap_oof.csv`
+- El challenger se arma como:
+  - `candidate_pred = clip(base_reference_pred + alpha * distilled_delta_pred)`
+- `alpha` se escanea en smoke y el ganador se compara directo contra `v3`.
+- Si el mejor `alpha` queda pegado al borde superior, la lectura correcta es que el regressor subestimó amplitud; no cierres la linea sin expandir ese grid.
+- Artefactos principales:
+  - `artifacts/reports/residual_distillation_smoke_analysis_oof.csv`
+  - `artifacts/reports/residual_distillation_smoke_metrics.json`
+  - `artifacts/reports/residual_distillation_smoke_reference_v3_metrics.json`
+  - `artifacts/reports/residual_distillation_smoke_candidate_metrics.json`
+  - `artifacts/reports/validation_protocol_residual_distillation_smoke_vs_v3_smoke.json`
+  - `artifacts/models/residual_distillation_smoke.cbm`
+- El `.cbm` que deja este smoke no es un camino de inferencia listo por si solo:
+  - para usarlo despues tendrias que reconstruir `base_reference_pred` fuera de train
+  - esa parte no se implemento en esta primera pasada
+
 3g4b. Correr un `uncertainty-band reranker` local directamente contra `v3`
 
 ```bash
