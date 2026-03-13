@@ -37,13 +37,34 @@ def _load_baseline_auc(metrics_path: str | Path) -> tuple[float, str]:
     )
 
 
+def _normalize_monotonic_option(raw: str) -> str:
+    value = str(raw or "none").strip().lower()
+    if value in {"", "none", "off", "false", "0"}:
+        return "none"
+    if value != "minimal":
+        raise ValueError(f"Unsupported monotonic option '{raw}'. Supported: none, minimal.")
+    return value
+
+
+def _monotonic_constraints_from_preset(preset: str) -> dict[str, int] | None:
+    normalized = _normalize_monotonic_option(preset)
+    if normalized == "none":
+        return None
+    return {
+        "tenure": -1,
+        "payment_friction_index": 1,
+        "contract_commitment_ordinal": -1,
+        "is_manual_payment": 1,
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run CV experiment with feature blocks")
     parser.add_argument("--train-csv", default="data/raw/train.csv", help="Path to train.csv")
     parser.add_argument(
         "--feature-blocks",
         default="A",
-        help="Comma-separated feature blocks to enable (supported: A,B,C,O,P). Use 'none' for baseline.",
+        help="Comma-separated feature blocks to enable (supported: A,B,C,F,G,T,H,R,S,V,O,P). Use 'none' for baseline.",
     )
     parser.add_argument(
         "--model-path",
@@ -66,6 +87,22 @@ def parse_args() -> argparse.Namespace:
         help="JSON path with incumbent metric (ensemble_oof_auc/oof_auc/holdout_auc)",
     )
     parser.add_argument("--folds", type=int, default=5, help="Number of Stratified K folds")
+    parser.add_argument(
+        "--stratify-mode",
+        choices=("target", "composite"),
+        default="target",
+        help="CV stratification: target only, or target plus family fallback.",
+    )
+    parser.add_argument(
+        "--monotonic-feature-set",
+        default="none",
+        help="Optional monotonic helper features to append (supported: none, minimal).",
+    )
+    parser.add_argument(
+        "--monotonic-preset",
+        default="none",
+        help="Optional CatBoost monotonic preset (supported: none, minimal).",
+    )
     parser.add_argument("--random-state", type=int, default=42, help="Random seed")
     parser.add_argument("--iterations", type=int, default=2200, help="Max boosting rounds")
     parser.add_argument("--learning-rate", type=float, default=0.05, help="Learning rate")
@@ -84,12 +121,19 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     feature_blocks = _parse_feature_blocks(args.feature_blocks)
+    monotonic_feature_set = _normalize_monotonic_option(args.monotonic_feature_set)
+    monotonic_preset = _normalize_monotonic_option(args.monotonic_preset)
+    if monotonic_feature_set == "none" and monotonic_preset != "none":
+        monotonic_feature_set = monotonic_preset
+    include_monotonic_features = monotonic_feature_set != "none"
+    monotonic_constraints = _monotonic_constraints_from_preset(monotonic_preset)
     params = CatBoostHyperParams(
         iterations=args.iterations,
         learning_rate=args.learning_rate,
         depth=args.depth,
         l2_leaf_reg=args.l2_leaf_reg,
         random_seed=args.random_state,
+        monotone_constraints=monotonic_constraints,
     )
 
     metrics = train_baseline_cv(
@@ -103,6 +147,8 @@ def main() -> int:
         early_stopping_rounds=args.early_stopping_rounds,
         verbose=args.verbose,
         feature_blocks=feature_blocks,
+        stratify_mode=args.stratify_mode,
+        include_monotonic_features=include_monotonic_features,
     )
 
     baseline_auc, baseline_key = _load_baseline_auc(args.baseline_metrics_path)
@@ -111,6 +157,8 @@ def main() -> int:
     metrics["baseline_metrics_path"] = args.baseline_metrics_path
     metrics["delta_vs_baseline_auc"] = float(metrics["oof_auc"] - baseline_auc)
     metrics["experiment_name"] = f"blocks_{'_'.join(feature_blocks) if feature_blocks else 'none'}"
+    metrics["monotonic_feature_set"] = monotonic_feature_set
+    metrics["monotonic_preset"] = monotonic_preset
 
     with Path(args.metrics_path).open("w", encoding="utf-8") as fh:
         json.dump(metrics, fh, indent=2)

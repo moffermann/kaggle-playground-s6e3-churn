@@ -16,7 +16,17 @@ from .data import (
     prepare_train_features,
 )
 from .evaluation import binary_auc
-from .feature_engineering import normalize_feature_blocks
+from .feature_engineering import (
+    BLOCK_G,
+    BLOCK_T,
+    apply_coverage_backoff_features,
+    apply_ec_surface_fit_features,
+    ensure_monotonic_features,
+    fit_ec_surface_state,
+    fit_coverage_backoff_state,
+    normalize_feature_blocks,
+    partition_feature_blocks,
+)
 from .modeling import (
     best_iteration_or_default,
     fit_full_train,
@@ -25,6 +35,141 @@ from .modeling import (
     predict_proba,
     save_model,
 )
+
+STRATIFY_TARGET = "target"
+STRATIFY_COMPOSITE = "composite"
+SUPPORTED_STRATIFY_MODES = (STRATIFY_TARGET, STRATIFY_COMPOSITE)
+
+
+def normalize_stratify_mode(stratify_mode: str | None) -> str:
+    """Validate supported CV/holdout stratification modes."""
+    normalized = str(stratify_mode or STRATIFY_TARGET).strip().lower()
+    if normalized not in SUPPORTED_STRATIFY_MODES:
+        raise ValueError(
+            f"Unsupported stratify_mode '{stratify_mode}'. Supported: {SUPPORTED_STRATIFY_MODES}"
+        )
+    return normalized
+
+
+def _build_composite_stratify_labels(
+    x: pd.DataFrame,
+    y: pd.Series,
+    *,
+    min_count: int,
+) -> pd.Series:
+    required = ("PaymentMethod", "Contract", "InternetService")
+    if any(column not in x.columns for column in required):
+        return y.astype(str).reset_index(drop=True)
+
+    y_label = y.astype(str)
+    contract = x["Contract"].astype(str)
+    payment_contract = x["PaymentMethod"].astype(str) + "__" + contract
+    segment3 = payment_contract + "__" + x["InternetService"].astype(str)
+
+    contract_joint = y_label + "__" + contract
+    payment_contract_joint = y_label + "__" + payment_contract
+    segment3_joint = y_label + "__" + segment3
+
+    contract_counts = contract_joint.value_counts(dropna=False)
+    payment_contract_counts = payment_contract_joint.value_counts(dropna=False)
+    segment3_counts = segment3_joint.value_counts(dropna=False)
+
+    labels = np.where(
+        segment3_joint.map(segment3_counts).ge(min_count),
+        segment3_joint,
+        np.where(
+            payment_contract_joint.map(payment_contract_counts).ge(min_count),
+            payment_contract_joint,
+            np.where(
+                contract_joint.map(contract_counts).ge(min_count),
+                contract_joint,
+                y_label,
+            ),
+        ),
+    )
+    return pd.Series(labels, index=x.index, dtype="object")
+
+
+def _build_stratify_labels(
+    x: pd.DataFrame,
+    y: pd.Series,
+    *,
+    stratify_mode: str,
+    min_count: int,
+) -> pd.Series:
+    normalized_mode = normalize_stratify_mode(stratify_mode)
+    if normalized_mode == STRATIFY_TARGET:
+        return y.astype(str).reset_index(drop=True)
+    return _build_composite_stratify_labels(x, y, min_count=max(int(min_count), 2))
+
+
+def _transform_pair_with_stateful_blocks(
+    x_fit: pd.DataFrame,
+    x_apply: pd.DataFrame,
+    stateful_blocks: Sequence[str],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    fit_out = x_fit.copy()
+    apply_out = x_apply.copy()
+    normalized_stateful = tuple(stateful_blocks)
+    if BLOCK_G in normalized_stateful:
+        coverage_state = fit_coverage_backoff_state(fit_out)
+        fit_out = apply_coverage_backoff_features(fit_out, coverage_state)
+        apply_out = apply_coverage_backoff_features(apply_out, coverage_state)
+    if BLOCK_T in normalized_stateful:
+        surface_state = fit_ec_surface_state(fit_out)
+        fit_out = apply_ec_surface_fit_features(fit_out, surface_state)
+        apply_out = apply_ec_surface_fit_features(apply_out, surface_state)
+    return fit_out, apply_out
+
+
+def _transform_single_with_stateful_blocks(
+    x_fit: pd.DataFrame,
+    stateful_blocks: Sequence[str],
+) -> pd.DataFrame:
+    fit_out, _ = _transform_pair_with_stateful_blocks(x_fit, x_fit, stateful_blocks)
+    return fit_out
+
+
+def _prepare_train_matrix(
+    train_df: pd.DataFrame,
+    feature_blocks: Sequence[str] | None,
+    *,
+    include_monotonic_features: bool = False,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], pd.DataFrame, pd.Series]:
+    normalized_blocks = normalize_feature_blocks(feature_blocks)
+    stateless_blocks, stateful_blocks = partition_feature_blocks(normalized_blocks)
+    x, y = prepare_train_features(train_df, drop_id=True, feature_blocks=stateless_blocks)
+    if include_monotonic_features:
+        x = ensure_monotonic_features(x)
+    return normalized_blocks, stateless_blocks, stateful_blocks, x, y
+
+
+def _prepare_test_matrix(
+    test_df: pd.DataFrame,
+    *,
+    stateless_blocks: Sequence[str],
+    stateful_blocks: Sequence[str],
+    train_csv_path: str | Path | None,
+    include_monotonic_features: bool = False,
+) -> pd.DataFrame:
+    x_test = prepare_test_features(test_df, drop_id=True, feature_blocks=stateless_blocks)
+    if include_monotonic_features:
+        x_test = ensure_monotonic_features(x_test)
+    if not stateful_blocks:
+        return x_test
+    if train_csv_path is None:
+        raise ValueError(
+            "Stateful feature blocks require train_csv_path at inference time. "
+            "Provide train_csv_path when using blocks like G or T."
+        )
+    train_df = load_csv(train_csv_path)
+    _, _, _, x_train_base, _ = _prepare_train_matrix(
+        train_df,
+        stateless_blocks,
+        include_monotonic_features=include_monotonic_features,
+    )
+    _, x_test_stateful = _transform_pair_with_stateful_blocks(x_train_base, x_test, stateful_blocks)
+    return x_test_stateful
 
 
 def train_baseline(
@@ -37,20 +182,33 @@ def train_baseline(
     early_stopping_rounds: int,
     verbose: int,
     feature_blocks: Sequence[str] | None = None,
+    stratify_mode: str = STRATIFY_TARGET,
+    include_monotonic_features: bool = False,
 ) -> Dict[str, Any]:
     """Train holdout+full baseline and save model + metrics."""
     train_df = load_csv(train_csv_path)
-    normalized_blocks = normalize_feature_blocks(feature_blocks)
-    x, y = prepare_train_features(train_df, drop_id=True, feature_blocks=normalized_blocks)
-    cat_columns = infer_categorical_columns(x)
+    normalized_blocks, _, stateful_blocks, x, y = _prepare_train_matrix(
+        train_df,
+        feature_blocks,
+        include_monotonic_features=include_monotonic_features,
+    )
+    normalized_stratify_mode = normalize_stratify_mode(stratify_mode)
+    stratify_labels = _build_stratify_labels(
+        x,
+        y,
+        stratify_mode=normalized_stratify_mode,
+        min_count=max(int(np.ceil(1.0 / min(valid_size, 1.0 - valid_size))), 2),
+    )
 
     x_train, x_valid, y_train, y_valid = train_test_split(
         x,
         y,
         test_size=valid_size,
         random_state=random_state,
-        stratify=y,
+        stratify=stratify_labels,
     )
+    x_train, x_valid = _transform_pair_with_stateful_blocks(x_train, x_valid, stateful_blocks)
+    cat_columns = infer_categorical_columns(x_train)
 
     holdout_model = fit_with_validation(
         x_train=x_train,
@@ -75,12 +233,15 @@ def train_baseline(
         random_seed=params.random_seed,
         loss_function=params.loss_function,
         eval_metric=params.eval_metric,
+        monotone_constraints=params.monotone_constraints,
     )
 
+    x_full = _transform_single_with_stateful_blocks(x, stateful_blocks)
+    full_cat_columns = infer_categorical_columns(x_full)
     full_model = fit_full_train(
-        x_train=x,
+        x_train=x_full,
         y_train=y,
-        cat_columns=cat_columns,
+        cat_columns=full_cat_columns,
         params=full_params,
         verbose=verbose,
     )
@@ -88,9 +249,11 @@ def train_baseline(
 
     metrics: Dict[str, Any] = {
         "train_rows": int(len(train_df)),
-        "feature_count": int(x.shape[1]),
+        "feature_count": int(x_full.shape[1]),
         "feature_blocks": list(normalized_blocks),
-        "categorical_columns": cat_columns,
+        "include_monotonic_features": bool(include_monotonic_features),
+        "categorical_columns": full_cat_columns,
+        "stratify_mode": normalized_stratify_mode,
         "holdout_auc": holdout_auc,
         "holdout_best_iteration": int(holdout_model.get_best_iteration()),
         "final_iterations": int(final_iterations),
@@ -107,24 +270,33 @@ def train_baseline(
 def _run_cv_for_seed(
     x: pd.DataFrame,
     y: pd.Series,
-    cat_columns: list[str],
     params: CatBoostHyperParams,
     folds: int,
     seed: int,
     early_stopping_rounds: int,
     verbose: int,
+    stateful_blocks: Sequence[str],
+    stratify_mode: str,
 ) -> Dict[str, Any]:
     """Run Stratified K-Fold CV for a single random seed and return OOF stats."""
     splitter = StratifiedKFold(n_splits=folds, shuffle=True, random_state=seed)
+    stratify_labels = _build_stratify_labels(
+        x,
+        y,
+        stratify_mode=stratify_mode,
+        min_count=folds,
+    )
     oof_pred = pd.Series(index=x.index, dtype="float64", name=f"oof_seed_{seed}")
     fold_rows = []
     fold_iterations = []
 
-    for fold_number, (train_idx, valid_idx) in enumerate(splitter.split(x, y), start=1):
+    for fold_number, (train_idx, valid_idx) in enumerate(splitter.split(x, stratify_labels), start=1):
         x_train = x.iloc[train_idx]
         y_train = y.iloc[train_idx]
         x_valid = x.iloc[valid_idx]
         y_valid = y.iloc[valid_idx]
+        x_train, x_valid = _transform_pair_with_stateful_blocks(x_train, x_valid, stateful_blocks)
+        cat_columns = infer_categorical_columns(x_train)
 
         fold_params = CatBoostHyperParams(
             iterations=params.iterations,
@@ -134,6 +306,7 @@ def _run_cv_for_seed(
             random_seed=seed,
             loss_function=params.loss_function,
             eval_metric=params.eval_metric,
+            monotone_constraints=params.monotone_constraints,
         )
 
         fold_model = fit_with_validation(
@@ -193,25 +366,31 @@ def train_baseline_cv(
     early_stopping_rounds: int,
     verbose: int,
     feature_blocks: Sequence[str] | None = None,
+    stratify_mode: str = STRATIFY_TARGET,
+    include_monotonic_features: bool = False,
 ) -> Dict[str, Any]:
     """Train baseline with Stratified K-Fold CV, generate OOF and fit final model."""
     if folds < 2:
         raise ValueError("folds must be >= 2")
 
     train_df = load_csv(train_csv_path)
-    normalized_blocks = normalize_feature_blocks(feature_blocks)
-    x, y = prepare_train_features(train_df, drop_id=True, feature_blocks=normalized_blocks)
-    cat_columns = infer_categorical_columns(x)
+    normalized_blocks, _, stateful_blocks, x, y = _prepare_train_matrix(
+        train_df,
+        feature_blocks,
+        include_monotonic_features=include_monotonic_features,
+    )
+    normalized_stratify_mode = normalize_stratify_mode(stratify_mode)
 
     seed_run = _run_cv_for_seed(
         x=x,
         y=y,
-        cat_columns=cat_columns,
         params=params,
         folds=folds,
         seed=random_state,
         early_stopping_rounds=early_stopping_rounds,
         verbose=verbose,
+        stateful_blocks=stateful_blocks,
+        stratify_mode=normalized_stratify_mode,
     )
     oof_pred = seed_run["oof_pred"]
     fold_rows = seed_run["fold_metrics"]
@@ -229,12 +408,15 @@ def train_baseline_cv(
         random_seed=params.random_seed,
         loss_function=params.loss_function,
         eval_metric=params.eval_metric,
+        monotone_constraints=params.monotone_constraints,
     )
 
+    x_full = _transform_single_with_stateful_blocks(x, stateful_blocks)
+    full_cat_columns = infer_categorical_columns(x_full)
     full_model = fit_full_train(
-        x_train=x,
+        x_train=x_full,
         y_train=y,
-        cat_columns=cat_columns,
+        cat_columns=full_cat_columns,
         params=full_params,
         verbose=verbose,
     )
@@ -253,9 +435,11 @@ def train_baseline_cv(
 
     metrics: Dict[str, Any] = {
         "train_rows": int(len(train_df)),
-        "feature_count": int(x.shape[1]),
+        "feature_count": int(x_full.shape[1]),
         "feature_blocks": list(normalized_blocks),
-        "categorical_columns": cat_columns,
+        "include_monotonic_features": bool(include_monotonic_features),
+        "categorical_columns": full_cat_columns,
+        "stratify_mode": normalized_stratify_mode,
         "cv_folds": int(folds),
         "cv_fold_metrics": fold_rows,
         "cv_mean_auc": cv_mean_auc,
@@ -285,6 +469,8 @@ def train_baseline_cv_multiseed(
     early_stopping_rounds: int,
     verbose: int,
     feature_blocks: Sequence[str] | None = None,
+    stratify_mode: str = STRATIFY_TARGET,
+    include_monotonic_features: bool = False,
 ) -> Dict[str, Any]:
     """Train CV baseline across multiple seeds and average OOF predictions."""
     if folds < 2:
@@ -297,12 +483,17 @@ def train_baseline_cv_multiseed(
         raise ValueError("seeds contain duplicates")
 
     train_df = load_csv(train_csv_path)
-    normalized_blocks = normalize_feature_blocks(feature_blocks)
-    x, y = prepare_train_features(train_df, drop_id=True, feature_blocks=normalized_blocks)
-    cat_columns = infer_categorical_columns(x)
+    normalized_blocks, _, stateful_blocks, x, y = _prepare_train_matrix(
+        train_df,
+        feature_blocks,
+        include_monotonic_features=include_monotonic_features,
+    )
+    normalized_stratify_mode = normalize_stratify_mode(stratify_mode)
 
     models_out_dir = Path(models_dir)
     models_out_dir.mkdir(parents=True, exist_ok=True)
+    x_full_train = _transform_single_with_stateful_blocks(x, stateful_blocks)
+    full_cat_columns = infer_categorical_columns(x_full_train)
 
     per_seed_metrics = []
     per_seed_oof = []
@@ -312,12 +503,13 @@ def train_baseline_cv_multiseed(
         seed_run = _run_cv_for_seed(
             x=x,
             y=y,
-            cat_columns=cat_columns,
             params=params,
             folds=folds,
             seed=seed,
             early_stopping_rounds=early_stopping_rounds,
             verbose=verbose,
+            stateful_blocks=stateful_blocks,
+            stratify_mode=normalized_stratify_mode,
         )
         per_seed_oof.append(seed_run["oof_pred"].values)
 
@@ -329,13 +521,14 @@ def train_baseline_cv_multiseed(
             random_seed=seed,
             loss_function=params.loss_function,
             eval_metric=params.eval_metric,
+            monotone_constraints=params.monotone_constraints,
         )
 
         model_path = models_out_dir / f"catboost_seed_{seed}.cbm"
         full_model = fit_full_train(
-            x_train=x,
+            x_train=x_full_train,
             y_train=y,
-            cat_columns=cat_columns,
+            cat_columns=full_cat_columns,
             params=full_params,
             verbose=verbose,
         )
@@ -378,9 +571,11 @@ def train_baseline_cv_multiseed(
     seed_oof_aucs = [item["oof_auc"] for item in per_seed_metrics]
     metrics: Dict[str, Any] = {
         "train_rows": int(len(train_df)),
-        "feature_count": int(x.shape[1]),
+        "feature_count": int(x_full_train.shape[1]),
         "feature_blocks": list(normalized_blocks),
-        "categorical_columns": cat_columns,
+        "include_monotonic_features": bool(include_monotonic_features),
+        "categorical_columns": full_cat_columns,
+        "stratify_mode": normalized_stratify_mode,
         "cv_folds": int(folds),
         "seeds": normalized_seeds,
         "per_seed_metrics": per_seed_metrics,
@@ -405,6 +600,8 @@ def make_submission(
     test_csv_path: str | Path,
     output_csv_path: str | Path,
     feature_blocks: Sequence[str] | None = None,
+    train_csv_path: str | Path | None = None,
+    include_monotonic_features: bool = False,
 ) -> Dict[str, Any]:
     """Generate submission CSV using a trained model."""
     test_df = load_csv(test_csv_path)
@@ -413,7 +610,14 @@ def make_submission(
 
     ids = test_df[ID_COLUMN].copy()
     normalized_blocks = normalize_feature_blocks(feature_blocks)
-    x_test = prepare_test_features(test_df, drop_id=True, feature_blocks=normalized_blocks)
+    stateless_blocks, stateful_blocks = partition_feature_blocks(normalized_blocks)
+    x_test = _prepare_test_matrix(
+        test_df,
+        stateless_blocks=stateless_blocks,
+        stateful_blocks=stateful_blocks,
+        train_csv_path=train_csv_path,
+        include_monotonic_features=include_monotonic_features,
+    )
     model = load_model(model_path)
     predictions = predict_proba(model, x_test)
 
@@ -426,6 +630,7 @@ def make_submission(
         "output_csv": str(out_path),
         "rows": int(len(submission)),
         "feature_blocks": list(normalized_blocks),
+        "include_monotonic_features": bool(include_monotonic_features),
         "prediction_min": float(submission[TARGET_COLUMN].min()),
         "prediction_max": float(submission[TARGET_COLUMN].max()),
     }
@@ -436,6 +641,8 @@ def make_submission_ensemble(
     test_csv_path: str | Path,
     output_csv_path: str | Path,
     feature_blocks: Sequence[str] | None = None,
+    train_csv_path: str | Path | None = None,
+    include_monotonic_features: bool = False,
 ) -> Dict[str, Any]:
     """Generate submission CSV by averaging predictions from multiple models."""
     if not model_paths:
@@ -447,7 +654,14 @@ def make_submission_ensemble(
 
     ids = test_df[ID_COLUMN].copy()
     normalized_blocks = normalize_feature_blocks(feature_blocks)
-    x_test = prepare_test_features(test_df, drop_id=True, feature_blocks=normalized_blocks)
+    stateless_blocks, stateful_blocks = partition_feature_blocks(normalized_blocks)
+    x_test = _prepare_test_matrix(
+        test_df,
+        stateless_blocks=stateless_blocks,
+        stateful_blocks=stateful_blocks,
+        train_csv_path=train_csv_path,
+        include_monotonic_features=include_monotonic_features,
+    )
 
     predictions_matrix = []
     for model_path in model_paths:
@@ -466,6 +680,7 @@ def make_submission_ensemble(
         "rows": int(len(submission)),
         "model_count": int(len(model_paths)),
         "feature_blocks": list(normalized_blocks),
+        "include_monotonic_features": bool(include_monotonic_features),
         "prediction_min": float(submission[TARGET_COLUMN].min()),
         "prediction_max": float(submission[TARGET_COLUMN].max()),
     }
