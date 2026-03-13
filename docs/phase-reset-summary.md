@@ -129,5 +129,15 @@ Lista exhaustiva y mantenida en:
   - `external_weight = 0.25`
   - `delta_vs_v3 = -0.0031935925`
   - veredicto: `FAIL`
+- `submission forensics` ya quedo operativo:
+  - `18/20` submissions historicas quedaron `COMPLETE`
+  - la unica familia con supervivencia publica repetida es `residual_hierarchy`
+  - `v3` sigue siendo el mejor submission publico (`0.91421`)
+  - la correlacion local/public aun es escasa a nivel de reportes ligados; hoy la lectura util es por familia, no por micro-delta
+- El `clean-room baseline rebuild` confirmo que `v3` no gana por complejidad accidental:
+  - `cb_raw = 0.9125779`
+  - `cb_r = 0.9132509`
+  - `cb_rv = 0.9138610`
+  - ninguno mejora ni mezcla contra `v3`
 - La siguiente apuesta concreta recomendada deja de ser esa linea.
   - toda hipotesis nueva debe volver a justificar explicitamente por que agrega senal no absorbida por `v3`

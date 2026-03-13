@@ -23,6 +23,7 @@ Esquema resumido, no exhaustivo:
 |       |-- gnn_probe.py
 |       |-- hard_example_stability.py
 |       |-- artifacts.py
+|       |-- cleanroom_baseline.py
 |       |-- evaluation.py
 |       |-- kaggle_api.py
 |       |-- linear_probe.py
@@ -31,6 +32,7 @@ Esquema resumido, no exhaustivo:
 |       |-- modeling.py
 |       |-- pseudo_labeling.py
 |       |-- specialist.py
+|       |-- submission_forensics.py
 |       |-- telco_transfer.py
 |       |-- target_priors.py
 |       |-- uncertainty_band.py
@@ -42,6 +44,7 @@ Esquema resumido, no exhaustivo:
 |   |-- analyze_error_by_class.py
 |   |-- analyze_family_generalization.py
 |   |-- analyze_label_noise.py
+|   |-- analyze_submission_forensics.py
 |   |-- analyze_v3_dominance.py
 |   |-- evaluate_against_v3.py
 |   |-- evaluate_validation_protocol.py
@@ -53,6 +56,7 @@ Esquema resumido, no exhaustivo:
 |   |-- experiment_linear_probe.py
 |   |-- experiment_mlp_probe.py
 |   |-- experiment_noise_mitigation.py
+|   |-- experiment_cleanroom_baselines.py
 |   |-- experiment_telco_transfer.py
 |   |-- experiment_uncertainty_band.py
 |   |-- run_ngram_xgb.py
@@ -301,7 +305,30 @@ Notas:
 - El conflicto `coarse` solo cuenta grupos chicos (`--max-near-duplicate-group-size`, default `5`, minimo `2`) para no confundir cohortes grandes con near-duplicates.
 - El JSON resume concentracion por `segment3`, `segment5` y por la macrofamilia dominante `Electronic check / Month-to-month / Fiber optic`.
 
-3g2c. Probar mitigacion minima de near-duplicates directamente contra `v3`
+3g2c. Hacer submission forensics sobre el historial de Kaggle y los artefactos locales
+
+```bash
+python scripts/analyze_submission_forensics.py \
+  --competition playground-series-s6e3 \
+  --reports-dir artifacts/reports \
+  --submissions-dir artifacts/submissions
+```
+
+Notas:
+- Usa la API autenticada de Kaggle y cruza el historial remoto con JSONs locales que referencian CSVs de `artifacts/submissions/`.
+- El linking entre Kaggle y reportes locales se hace por nombre de CSV; `--submissions-dir` solo controla la verificacion de existencia del archivo local.
+- Salidas por defecto:
+  - `artifacts/reports/submission_forensics_summary.json`
+  - `artifacts/reports/submission_forensics_ledger.csv`
+  - `artifacts/reports/submission_forensics_report_links.csv`
+- El resumen destaca:
+  - mejor submission publica
+  - clustering por `submission_family`
+  - cantidad de submissions con artefactos locales ligados
+  - correlacion local/public cuando existe una metrica local comparable suficiente
+- Sirve para identificar familias que ya mostraron supervivencia publica antes de gastar CPU en `midcap`.
+
+3g2d. Probar mitigacion minima de near-duplicates directamente contra `v3`
 
 ```bash
 python scripts/experiment_noise_mitigation.py \
@@ -331,6 +358,35 @@ Notas:
   - `<label>_candidate_metrics.json`
   - `<label>_reference_v3_metrics.json`
   - `validation_protocol_<label>_vs_v3_smoke.json`
+
+3g2e. Correr el clean-room baseline rebuild minimo contra `v3`
+
+```bash
+python scripts/experiment_cleanroom_baselines.py \
+  --train-csv data/raw/train.csv \
+  --v3-oof artifacts/reports/validation_protocol_v3_chain_oof.csv#candidate_pred
+```
+
+Notas:
+- Ejecuta tres reconstrucciones minimas del baseline con CatBoost:
+  - `cb_raw`
+  - `cb_r`
+  - `cb_rv`
+- Todas se comparan directamente contra `v3` desde `smoke` usando el mismo protocolo de validacion.
+- Los labels efectivos del suite son:
+  - `cleanroom_cb_raw_smoke`
+  - `cleanroom_cb_r_smoke`
+  - `cleanroom_cb_rv_smoke`
+- Salidas por defecto:
+  - `artifacts/reports/cleanroom_baseline_suite_summary.json`
+  - `artifacts/reports/cleanroom_reference_v3_metrics.json`
+  - por cada label (`cleanroom_cb_raw_smoke`, `cleanroom_cb_r_smoke`, `cleanroom_cb_rv_smoke`):
+    - `<label>_metrics.json`
+    - `<label>_oof.csv`
+    - `<label>_analysis_oof.csv`
+    - `<label>_candidate_metrics.json`
+    - `validation_protocol_<label>_vs_v3_smoke.json`
+- El objetivo no es encontrar un nuevo incumbent, sino medir cuanto del edge de `v3` sigue existiendo cuando se reconstruye el stack desde una base simple.
 
 3g3. Evaluar un candidato OOF bajo el protocolo de `validation reset`
 

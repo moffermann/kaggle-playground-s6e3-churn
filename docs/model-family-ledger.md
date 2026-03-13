@@ -30,6 +30,11 @@ Fecha: `2026-03-13`
 - Regularizacion ciega de `RV`.
 - Sample weighting damage-aware.
 - Miembros family-aware por stratify compuesto.
+- `clean-room baseline rebuild`:
+  - `cb_raw`
+  - `cb_r`
+  - `cb_rv`
+  - todos fallan el gate directo contra `v3`
 
 ### Especialistas, Challengers Y Overrides Locales
 
@@ -190,3 +195,22 @@ Lectura:
 La siguiente apuesta recomendada vuelve a ser un filtro, no un modelo concreto:
 
 - solo abrir una hipotesis nueva si explica explicitamente por que su senal no esta ya absorbida por `v3`
+
+## Submission Forensics
+
+- Historial Kaggle auditado:
+  - `20` submissions historicas
+  - `18` `COMPLETE`
+  - `2` `ERROR`
+- Mejor submission publico:
+  - `playground-series-s6e3-residual-hier-v3.csv`
+  - `ref 50828079`
+  - `public score 0.91421`
+- Familia con supervivencia publica repetida:
+  - `residual_hierarchy`
+- Familias que tuvieron score publico razonable pero sin repeticion comparable:
+  - `teacher_blend_rv`
+  - `teacher_blend_r`
+  - `pseudo_labeling`
+- Lectura operativa:
+  - el historial publico refuerza que las mejoras durables vinieron de la familia residual, no de challengers standalone ni de lineas exploratorias aisladas

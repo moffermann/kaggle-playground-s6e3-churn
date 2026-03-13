@@ -33,6 +33,8 @@ Estado operativo actual:
 - La linea `uncertainty-band reranker` tambien quedo cerrada como `NO-GO`.
 - La linea `hard-example stability score` tambien quedo cerrada como `NO-GO`.
 - La linea `counterfactual teacher sensitivity` tambien quedo cerrada como `NO-GO`.
+- `submission forensics` ya esta operativo y confirma que la familia con mejor supervivencia publica es `residual_hierarchy`.
+- El `clean-room baseline rebuild` ya confirmo que `v3` sigue muy por encima de `cb_raw`, `cb_r` y `cb_rv` reconstruidos desde cero.
 - Siguiente direccion recomendada:
   - no abrir otra linea sin pasar primero por el filtro documentado en `phase-reset-summary.md` y `model-family-ledger.md`
   - toda hipotesis nueva debe nacer comparada directamente contra `v3` desde `smoke`
