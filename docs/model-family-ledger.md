@@ -55,6 +55,15 @@ Fecha: `2026-03-13`
     - banda + desacuerdo alto del teacher (`min_teacher_std`)
   - mejor delta observado contra `v3`: `+6.69e-06`
   - no alcanza el gate operativo `1e-05`
+- `hard-example stability score` sobre `v3`:
+  - fuente: OOF repetidos baratos (`R,V`)
+  - score: `stability_pred_std + stability_flip_rate`
+  - variantes cerradas:
+    - `q80`
+    - `q90`
+    - `q80 + banda ambigua de v3`
+  - mejor delta observado contra `v3`: `+8.28e-07`
+  - no alcanza el gate operativo `1e-05`
 
 ### Regularizacion Estructural
 
@@ -116,9 +125,9 @@ La evidencia acumulada apunta a que el ROI restante ya no esta en mas filtros so
 
 Las apuestas que siguen vivas son:
 
-1. diagnostico de ejemplo duro/inestable con trazabilidad por familia y por banda de confianza
-2. fuente de senal materialmente nueva que nazca ya comparada contra `v3`
-3. stress tests de generalizacion por familia dominante y por banda ambigua
+1. fuente de senal materialmente nueva que nazca ya comparada contra `v3`
+2. stress tests de generalizacion por familia dominante y por banda ambigua
+3. diagnostico de ejemplo duro/inestable solo como soporte, no como challenger
 
 ## Filtro Para La Proxima Hipotesis
 
@@ -134,6 +143,7 @@ La siguiente linea no debe ser:
 - otro mask dentro de `EC / MTM / Fiber`
 - otro challenger global cercano a `R,V`
 - otra intervencion data-centric sin senal nueva
+- otro score de dureza/estabilidad derivado solo de resampling del mismo stack
 
 ## Recomendacion Operativa
 
@@ -144,3 +154,13 @@ Antes de abrir una hipotesis nueva:
    - por que no esta ya absorbida por `v3`
    - como pasaria el gate directo contra `v3`
 2. descartar desde el diseno cualquier idea cuyo mejor caso razonable siga estando en el orden de `1e-06`
+
+La siguiente apuesta recomendada es:
+
+- `counterfactual teacher sensitivity features`
+
+Razon:
+
+- agrega una senal que no existe hoy en `cb/xgb/lgb/r/rv`: la respuesta local del teacher ante perturbaciones plausibles del estado del cliente
+- no depende de otro mask local
+- puede evaluarse desde `smoke` contra `v3`

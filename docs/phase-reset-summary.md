@@ -68,6 +68,9 @@ Lista exhaustiva y mantenida en:
   - incluso la linea mas alineada con ese hallazgo (`uncertainty-band reranker`) no supero el gate:
     - mejor delta contra `v3`: `+6.69e-06`
     - sigue por debajo del minimo operativo `1e-05`
+  - la extension natural de esa idea (`hard-example stability score`) tampoco abre una mejora competitiva:
+    - mejor delta contra `v3`: `+8.28e-07`
+    - sirve como diagnostico, no como challenger
 - El cuello de botella no parece ser:
   - falta de otro seed
   - otro blend scan
@@ -112,7 +115,11 @@ Lista exhaustiva y mantenida en:
 - La siguiente apuesta debe empezar por evaluacion y criterio de promocion, no por mas CPU.
 - La hipotesis de `external telco transfer feature` ya quedo cerrada como `NO-GO`.
 - La hipotesis de `uncertainty-band reranker` tambien queda cerrada como `NO-GO`.
+- La hipotesis de `hard-example stability score` tambien queda cerrada como `NO-GO`.
 - La siguiente hipotesis recomendada ahora no es un modelo especifico, sino un filtro:
   - debe aportar senal materialmente nueva
   - debe explicitar por que `v3` no la absorbe ya
   - debe nacer comparada directamente contra `v3` desde `smoke`
+- La siguiente apuesta concreta recomendada es:
+  - `counterfactual teacher sensitivity features`
+  - idea base: medir como cambia el teacher cuando se perturban variables de negocio plausibles del mismo ejemplo
