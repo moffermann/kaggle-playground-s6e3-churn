@@ -65,6 +65,9 @@ Lista exhaustiva y mantenida en:
   - la mayor presion aparece en la banda de baja confianza de `v3` (`abs(v3-0.5) <= 0.20`)
   - cuando un challenger se aleja mucho de `v3`, normalmente pierde mas logloss y ranking
   - el residual casi-vivo mejora algo de logloss, pero no logra mejorar ranking global
+  - incluso la linea mas alineada con ese hallazgo (`uncertainty-band reranker`) no supero el gate:
+    - mejor delta contra `v3`: `+6.69e-06`
+    - sigue por debajo del minimo operativo `1e-05`
 - El cuello de botella no parece ser:
   - falta de otro seed
   - otro blend scan
@@ -78,6 +81,7 @@ Lista exhaustiva y mantenida en:
 
 - `EC / MTM / Fiber` sigue siendo la familia mas danina.
 - Hay mejora local en algunas variantes dentro de esa macrofamilia, pero no suficiente ni estable contra `v3`.
+- La banda ambigua de `v3` si existe como zona de presion real, pero ya no justifica otra linea de reranker local similar.
 - La validacion local sigue siendo util, pero no lo bastante dura como para discriminar bien mejoras pequenas.
 
 ## Reglas Operativas
@@ -107,7 +111,8 @@ Lista exhaustiva y mantenida en:
 - La siguiente apuesta no debe ser otro experimento pequeno sobre `EC / MTM / Fiber`.
 - La siguiente apuesta debe empezar por evaluacion y criterio de promocion, no por mas CPU.
 - La hipotesis de `external telco transfer feature` ya quedo cerrada como `NO-GO`.
-- La siguiente hipotesis recomendada ahora es:
-  - `uncertainty-band reranker`
-  - limitado a la macrofamilia dominante
-  - solo para filas con baja confianza de `v3` y alto desacuerdo potencial
+- La hipotesis de `uncertainty-band reranker` tambien queda cerrada como `NO-GO`.
+- La siguiente hipotesis recomendada ahora no es un modelo especifico, sino un filtro:
+  - debe aportar senal materialmente nueva
+  - debe explicitar por que `v3` no la absorbe ya
+  - debe nacer comparada directamente contra `v3` desde `smoke`

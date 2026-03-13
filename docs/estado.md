@@ -29,4 +29,7 @@ Estado operativo actual:
   - `public score = 0.91421`
 - La linea data-centric de `label noise / near-duplicates` quedo cerrada como `NO-GO` para mitigacion directa.
 - La linea `external telco transfer feature` tambien quedo cerrada como `NO-GO`.
-- Siguiente direccion recomendada: `uncertainty-band reranker` focal sobre la banda ambigua de `v3`.
+- La linea `uncertainty-band reranker` tambien quedo cerrada como `NO-GO`.
+- Siguiente direccion recomendada:
+  - no abrir otra linea sin pasar primero por el filtro documentado en `phase-reset-summary.md` y `model-family-ledger.md`
+  - toda hipotesis nueva debe nacer comparada directamente contra `v3` desde `smoke`

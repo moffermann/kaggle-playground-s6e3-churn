@@ -46,6 +46,15 @@ Fecha: `2026-03-13`
 - Ranking reranker local.
 - `teacher_meta` lineal.
 - `teacher_meta` no lineal (`catboost_meta`).
+- `uncertainty-band reranker` sobre `v3`:
+  - familia objetivo: `Electronic check / Month-to-month / Fiber optic`
+  - banda ambigua: `abs(v3 - 0.5) <= 0.20`
+  - variantes cerradas:
+    - banda pura
+    - banda mas estrecha (`0.15`, `0.10`)
+    - banda + desacuerdo alto del teacher (`min_teacher_std`)
+  - mejor delta observado contra `v3`: `+6.69e-06`
+  - no alcanza el gate operativo `1e-05`
 
 ### Regularizacion Estructural
 
@@ -107,19 +116,31 @@ La evidencia acumulada apunta a que el ROI restante ya no esta en mas filtros so
 
 Las apuestas que siguen vivas son:
 
-1. correccion focal sobre la banda ambigua de `v3` dentro de la macrofamilia dominante
-2. identificacion de ejemplos duros/inestables por fold y por familia, pero solo como diagnostico
-3. stress tests de generalizacion por familia dominante
+1. diagnostico de ejemplo duro/inestable con trazabilidad por familia y por banda de confianza
+2. fuente de senal materialmente nueva que nazca ya comparada contra `v3`
+3. stress tests de generalizacion por familia dominante y por banda ambigua
 
-## Proxima Hipotesis
+## Filtro Para La Proxima Hipotesis
 
-La siguiente linea recomendada es:
+La siguiente linea solo se abre si cumple al menos una de estas condiciones:
 
-- `uncertainty-band reranker`
+- agrega una fuente de senal que no este ya contenida en `cb/xgb/lgb/r/rv`
+- o cambia la geometria del problema de forma demostrable, no solo el orden de un reranker local
+- y puede evaluarse contra `v3` desde `smoke` sin depender de un teacher intermedio
 
-Objetivo:
+La siguiente linea no debe ser:
 
-- no reemplazar `v3` globalmente
-- intervenir solo en la banda de baja confianza de `v3` (`abs(v3-0.5) <= 0.20`)
-- concentrarse en `Electronic check / Month-to-month / Fiber optic`
-- exigir que la correccion viva contra `v3` desde smoke
+- otro reranker local sobre la misma macrofamilia dominante
+- otro mask dentro de `EC / MTM / Fiber`
+- otro challenger global cercano a `R,V`
+- otra intervencion data-centric sin senal nueva
+
+## Recomendacion Operativa
+
+Antes de abrir una hipotesis nueva:
+
+1. definir explicita y por adelantado:
+   - fuente de senal nueva
+   - por que no esta ya absorbida por `v3`
+   - como pasaria el gate directo contra `v3`
+2. descartar desde el diseno cualquier idea cuyo mejor caso razonable siga estando en el orden de `1e-06`
