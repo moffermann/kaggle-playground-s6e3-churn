@@ -32,6 +32,7 @@ Esquema resumido, no exhaustivo:
 |       |-- specialist.py
 |       |-- telco_transfer.py
 |       |-- target_priors.py
+|       |-- uncertainty_band.py
 |       |-- v3_dominance.py
 |       `-- pipeline.py
 |-- scripts/
@@ -51,6 +52,7 @@ Esquema resumido, no exhaustivo:
 |   |-- experiment_mlp_probe.py
 |   |-- experiment_noise_mitigation.py
 |   |-- experiment_telco_transfer.py
+|   |-- experiment_uncertainty_band.py
 |   |-- run_ngram_xgb.py
 |   |-- experiment_pseudo_label_family.py
 |   |-- experiment_local_calibrator.py
@@ -423,6 +425,33 @@ Notas:
   - metrics JSON comparables (`cv_std_auc` incluido)
   - veredicto del protocolo aplicado directamente contra `v3`
   - summary JSON con el resumen del veredicto y los paths generados
+
+3g4b. Correr un `uncertainty-band reranker` local directamente contra `v3`
+
+```bash
+python scripts/experiment_uncertainty_band.py \
+  --stage smoke \
+  --feature-blocks "H,R,S,V" \
+  --target-family-level segment3 \
+  --target-family-value "Electronic check__Month-to-month__Fiber optic"
+```
+
+Notas:
+- La referencia se fija en `v3` leyendo por defecto:
+  - `artifacts/reports/validation_protocol_v3_chain_oof.csv#candidate_pred`
+- El modelo no reemplaza al incumbent global:
+  - solo corrige filas dentro de la familia objetivo
+  - y solo si `abs(v3 - 0.5) <= --band-half-width`
+- Por defecto agrega tambien las componentes `cb/xgb/lgb/r/rv` como features de desacuerdo del teacher.
+- Guardrails relevantes:
+  - valida alineacion exacta de `v3` contra `train.csv`
+  - exige ambos labels dentro de la banda
+  - exige minimo de filas en train y valid por fold
+  - si pasas `--min-teacher-std`, aborta si el filtro adicional de desacuerdo distorsiona demasiado la tasa base del mask segun `--max-relative-mask-drift`
+- Artefactos principales:
+  - `artifacts/reports/uncertainty_band_smoke_metrics.json`
+  - `artifacts/reports/uncertainty_band_smoke_oof.csv`
+  - `artifacts/reports/validation_protocol_uncertainty_band_smoke_vs_v3.json`
 
 3g5. Correr la linea minima `bi-gram + target encoding + XGBoost`
 
