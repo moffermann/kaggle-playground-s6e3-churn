@@ -480,6 +480,56 @@ Notas:
   - `artifacts/reports/hard_example_stability_smoke_oof.csv`
   - `artifacts/reports/validation_protocol_hard_example_stability_smoke_vs_v3.json`
 
+3g4d. Correr la linea `counterfactual teacher sensitivity` directamente contra `v3`
+
+```bash
+python scripts/experiment_counterfactual_sensitivity.py \
+  --stage smoke \
+  --target-family-level segment3 \
+  --target-family-value "Electronic check__Month-to-month__Fiber optic"
+```
+
+Notas:
+- Esta linea no entrena otro challenger grande. Parte desde `v3` y construye una correccion aditiva local.
+- La correccion se basa en perturbaciones plausibles del mismo cliente, evaluadas con esta subfamilia del teacher disponible como modelos full-train:
+  - `cb`
+  - `r`
+  - `rv`
+  con pesos renormalizados desde `artifacts/reports/submission_candidate_cb5_xgb3_lgb_r_rvhi_weights.json`.
+- Los escenarios contrafactuales se controlan con `--counterfactuals`; por defecto usa:
+  - `auto_payment`
+  - `paperless_off`
+  - `contract_upgrade`
+  - `stability_bundle`
+- La señal no es una probabilidad nueva; es una medida de `counterfactual drop`:
+  - cuanto baja el teacher si movemos al cliente a un estado mas estable
+  - las subidas se recortan a `0`, o sea, el smoke usa solo `positive drop`
+- `--signal-names` define como se agrega esa sensibilidad:
+  - `stable_bundle_drop`
+  - `mean_positive_drop`
+  - `max_positive_drop`
+- `--alpha-grid` escanea una correccion aditiva sobre `v3` y elige el mejor `candidate_pred` por AUC OOF.
+- La correccion solo se aplica dentro del mask objetivo:
+  - `target-family-level`
+  - `target-family-value`
+  y fuera de ese mask deja `candidate_pred == reference_pred`.
+- `--reference-band-half-width` es opcional; si se pasa, la correccion solo se aplica tambien dentro de la banda ambigua de `v3`.
+  Debe cumplir `0 < width < 0.5`.
+- El mask final debe tener al menos `2000` filas; si no, el script falla de forma explicita.
+- `--component-weights-json` debe contener:
+  - `weights`
+  - `components.cb_models`
+  - `components.r_model`
+  - `components.rv_model`
+- El input crudo debe seguir teniendo estas columnas porque los contrafactuales las mutan directamente:
+  - `PaymentMethod`
+  - `PaperlessBilling`
+  - `Contract`
+- Artefactos principales:
+  - `artifacts/reports/counterfactual_teacher_smoke_metrics.json`
+  - `artifacts/reports/counterfactual_teacher_smoke_analysis_oof.csv`
+  - `artifacts/reports/validation_protocol_counterfactual_teacher_smoke_vs_v3.json`
+
 3g5. Correr la linea minima `bi-gram + target encoding + XGBoost`
 
 ```bash
