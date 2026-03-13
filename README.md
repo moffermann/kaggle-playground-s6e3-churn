@@ -28,6 +28,7 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |       |-- modeling.py
 |       |-- pseudo_labeling.py
 |       |-- specialist.py
+|       |-- telco_transfer.py
 |       |-- target_priors.py
 |       `-- pipeline.py
 |-- scripts/
@@ -44,6 +45,8 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |   |-- experiment_hierarchical_priors.py
 |   |-- experiment_linear_probe.py
 |   |-- experiment_mlp_probe.py
+|   |-- experiment_noise_mitigation.py
+|   |-- experiment_telco_transfer.py
 |   |-- run_ngram_xgb.py
 |   |-- experiment_pseudo_label_family.py
 |   |-- experiment_local_calibrator.py
@@ -422,6 +425,38 @@ Notas:
   - `reference_pred`
   - `candidate_pred`
   que se puede pasar directo a `evaluate_validation_protocol.py`.
+
+3g5b. Correr la linea minima `external Telco transfer feature`
+
+```bash
+python scripts/experiment_telco_transfer.py \
+  --train-csv data/raw/train.csv \
+  --test-csv data/raw/test.csv \
+  --original-csv artifacts/external/blastchar_telco/WA_Fn-UseC_-Telco-Customer-Churn.csv \
+  --feature-blocks R,V \
+  --label telco_transfer_smoke
+```
+
+Notas:
+- Entrena un teacher CatBoost solo sobre el dataset original `blastchar` y proyecta una sola feature nueva:
+  - `external_telco_pred`
+- El teacher externo no usa etiquetas de la competencia.
+- El script registra hash/metadata de:
+  - `train.csv`
+  - `test.csv`
+  - `original.csv`
+- Si hay filas del dataset original que coinciden exactamente con `train/test`, las elimina antes de entrenar el teacher externo.
+- El challenger de la competencia se entrena en smoke con `feature_blocks` normales mas `external_telco_pred`.
+- Los artefactos principales son:
+  - `<label>_metrics.json`
+  - `<label>_oof.csv`
+  - `<label>_analysis_oof.csv`
+  - `<label>_candidate_metrics.json`
+  - `<label>_reference_v3_metrics.json`
+  - `<label>_transfer_train.csv`
+  - `<label>_transfer_test.csv`
+  - `validation_protocol_<label>_vs_v3_smoke.json`
+- El primer gate es siempre directo contra `v3`; no hay blend por default en esta linea.
 
 3g6. Correr el smoke minimo `GraphSAGE + ANN graph`
 
