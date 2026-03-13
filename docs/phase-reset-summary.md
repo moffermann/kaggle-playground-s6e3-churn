@@ -1,7 +1,7 @@
 # Resumen De Reset De Fase
 
 Fecha: `2026-03-11`
-Ultima actualizacion: `2026-03-12`
+Ultima actualizacion: `2026-03-13`
 
 ## Incumbent
 
@@ -60,6 +60,11 @@ Lista exhaustiva y mantenida en:
   - `label noise` puro parece minoritario
   - la mayor parte de la sospecha se concentra en `near-duplicates / cohortes casi repetidas`
   - pero mitigar eso de forma minima dano el ranking frente a `v3`
+- El diagnostico agresivo de dominancia de `v3` agrego una lectura mas precisa:
+  - `v3` gana de forma consistente en la macrofamilia dominante para casi todos los challengers
+  - la mayor presion aparece en la banda de baja confianza de `v3` (`abs(v3-0.5) <= 0.20`)
+  - cuando un challenger se aleja mucho de `v3`, normalmente pierde mas logloss y ranking
+  - el residual casi-vivo mejora algo de logloss, pero no logra mejorar ranking global
 - El cuello de botella no parece ser:
   - falta de otro seed
   - otro blend scan
@@ -67,6 +72,7 @@ Lista exhaustiva y mantenida en:
 - El cuello parece estar en:
   - generalizacion real a familias/cohortes dominantes
   - evitar falsos positivos locales que no sobreviven al leaderboard
+  - resolver mejor la zona ambigua de `v3`, no reemplazarlo globalmente
 
 ## Ambiguo Pero Util
 
@@ -100,4 +106,8 @@ Lista exhaustiva y mantenida en:
 - El `validation reset` ya quedo implementado y es prerrequisito cumplido.
 - La siguiente apuesta no debe ser otro experimento pequeno sobre `EC / MTM / Fiber`.
 - La siguiente apuesta debe empezar por evaluacion y criterio de promocion, no por mas CPU.
-- La siguiente hipotesis recomendada es usar el dataset original `telco-customer-churn` como fuente supervisada externa.
+- La hipotesis de `external telco transfer feature` ya quedo cerrada como `NO-GO`.
+- La siguiente hipotesis recomendada ahora es:
+  - `uncertainty-band reranker`
+  - limitado a la macrofamilia dominante
+  - solo para filas con baja confianza de `v3` y alto desacuerdo potencial

@@ -8,6 +8,8 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 
 ## Estructura del proyecto
 
+Esquema resumido, no exhaustivo:
+
 ```
 .
 |-- src/
@@ -30,6 +32,7 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |       |-- specialist.py
 |       |-- telco_transfer.py
 |       |-- target_priors.py
+|       |-- v3_dominance.py
 |       `-- pipeline.py
 |-- scripts/
 |   |-- audit_submission_parity.py
@@ -37,6 +40,7 @@ Predecir la probabilidad de `Churn` para cada `id` del archivo `test.csv`.
 |   |-- analyze_error_by_class.py
 |   |-- analyze_family_generalization.py
 |   |-- analyze_label_noise.py
+|   |-- analyze_v3_dominance.py
 |   |-- evaluate_against_v3.py
 |   |-- evaluate_validation_protocol.py
 |   |-- evaluate_ensemble_robustness.py
@@ -351,6 +355,33 @@ Notas:
   - `--reference-metrics-json`
 - Sin esos JSON el script igual corre, pero el check `midcap_cv_std` queda en `FAIL`.
 - Para `submission`, el gate exige `--submission-csv` para trazar el artefacto final.
+
+3g3b. Diagnosticar por que `v3` domina challengers fallidos
+
+```bash
+python scripts/analyze_v3_dominance.py --label v3_dominance_v1
+```
+
+Notas:
+- Usa `v3` fijo desde `artifacts/reports/validation_protocol_v3_chain_oof.csv#candidate_pred`.
+- Por default compara un set curado de challengers que representan familias distintas de fracaso:
+  - bloque global
+  - challenger por familia
+  - mitigacion data-centric
+  - transfer externo
+  - residual casi-vivo
+- Produce:
+  - `<label>_summary.json`
+  - `<label>_challengers.csv`
+  - `<label>_families.csv`
+  - `<label>_slices.csv`
+- Los cortes incluyen:
+  - `segment3`
+  - `segment5`
+  - deciles de score `v3`
+  - buckets de confianza `abs(v3 - 0.5)`
+  - buckets de desacuerdo `abs(candidate - v3)`
+- Sirve para decidir la siguiente hipotesis sin entrenar modelos nuevos.
 
 3g4. Comparar una chain challenger directamente contra `v3`
 

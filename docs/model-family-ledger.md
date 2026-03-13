@@ -1,6 +1,6 @@
 # Model Family Ledger
 
-Fecha: `2026-03-12`
+Fecha: `2026-03-13`
 
 ## Incumbent
 
@@ -84,6 +84,7 @@ Fecha: `2026-03-12`
 - `MLP embeddings`
 - `bi/tri-gram TE + XGBoost`
 - `GNN starter + ANN graph`
+- `external telco transfer feature`
 
 ## Regla Para No Reabrir Una Familia Cerrada
 
@@ -102,11 +103,11 @@ No basta con:
 
 ## ROI Restante
 
-La evidencia acumulada apunta a que el ROI restante ya no esta en mas filtros sobre filas sospechosas ni en otra familia de modelo cercana al stack actual.
+La evidencia acumulada apunta a que el ROI restante ya no esta en mas filtros sobre filas sospechosas ni en otra familia de modelo global cercana al stack actual.
 
 Las apuestas que siguen vivas son:
 
-1. uso supervisado de fuente externa alineada al dominio (`telco-customer-churn`) como senal transferida
+1. correccion focal sobre la banda ambigua de `v3` dentro de la macrofamilia dominante
 2. identificacion de ejemplos duros/inestables por fold y por familia, pero solo como diagnostico
 3. stress tests de generalizacion por familia dominante
 
@@ -114,10 +115,11 @@ Las apuestas que siguen vivas son:
 
 La siguiente linea recomendada es:
 
-- `external telco transfer feature`
+- `uncertainty-band reranker`
 
 Objetivo:
 
-- entrenar un teacher externo sobre el dataset original `telco-customer-churn`
-- proyectar esa senal sobre `train/test` de la competencia
-- medir si aporta valor frente a `v3` como feature o como miembro complementario
+- no reemplazar `v3` globalmente
+- intervenir solo en la banda de baja confianza de `v3` (`abs(v3-0.5) <= 0.20`)
+- concentrarse en `Electronic check / Month-to-month / Fiber optic`
+- exigir que la correccion viva contra `v3` desde smoke

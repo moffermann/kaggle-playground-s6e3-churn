@@ -1,7 +1,7 @@
 # Estado del proyecto
 
 Fecha de inicializacion: `2026-03-04`
-Ultima actualizacion: `2026-03-12`
+Ultima actualizacion: `2026-03-13`
 
 Estado operativo actual:
 - resumen ejecutivo: [phase-reset-summary.md](./phase-reset-summary.md)
@@ -28,4 +28,5 @@ Estado operativo actual:
   - Kaggle `ref 50828079`
   - `public score = 0.91421`
 - La linea data-centric de `label noise / near-duplicates` quedo cerrada como `NO-GO` para mitigacion directa.
-- Siguiente direccion recomendada: senal supervisada externa desde `telco-customer-churn`.
+- La linea `external telco transfer feature` tambien quedo cerrada como `NO-GO`.
+- Siguiente direccion recomendada: `uncertainty-band reranker` focal sobre la banda ambigua de `v3`.
