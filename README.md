@@ -21,6 +21,7 @@ Esquema resumido, no exhaustivo:
 |       |-- feature_engineering.py
 |       |-- fm_probe.py
 |       |-- gnn_probe.py
+|       |-- hard_example_stability.py
 |       |-- artifacts.py
 |       |-- evaluation.py
 |       |-- kaggle_api.py
@@ -48,6 +49,7 @@ Esquema resumido, no exhaustivo:
 |   |-- experiment_fm_probe.py
 |   |-- experiment_gnn_probe.py
 |   |-- experiment_hierarchical_priors.py
+|   |-- experiment_hard_example_stability.py
 |   |-- experiment_linear_probe.py
 |   |-- experiment_mlp_probe.py
 |   |-- experiment_noise_mitigation.py
@@ -452,6 +454,31 @@ Notas:
   - `artifacts/reports/uncertainty_band_smoke_metrics.json`
   - `artifacts/reports/uncertainty_band_smoke_oof.csv`
   - `artifacts/reports/validation_protocol_uncertainty_band_smoke_vs_v3.json`
+
+3g4c. Correr la linea `hard-example stability` directamente contra `v3`
+
+```bash
+python scripts/experiment_hard_example_stability.py \
+  --stage smoke \
+  --stability-feature-blocks "R,V" \
+  --reranker-feature-blocks "H,R,S,V" \
+  --family-level segment3 \
+  --family-value "Electronic check__Month-to-month__Fiber optic"
+```
+
+Notas:
+- Esta linea construye primero un `hard_example_score` por fila usando OOF repetidos baratos.
+- El score sale de:
+  - `stability_pred_std`
+  - `stability_flip_rate`
+- Luego entrena un residual reranker local solo dentro de:
+  - la familia objetivo
+  - y el top cuantílico de `hard_example_score` dentro de esa familia
+- `--reference-band-half-width` es opcional; sirve para intersectar el mask de dureza con la banda ambigua de `v3`.
+- Artefactos principales:
+  - `artifacts/reports/hard_example_stability_smoke_metrics.json`
+  - `artifacts/reports/hard_example_stability_smoke_oof.csv`
+  - `artifacts/reports/validation_protocol_hard_example_stability_smoke_vs_v3.json`
 
 3g5. Correr la linea minima `bi-gram + target encoding + XGBoost`
 
