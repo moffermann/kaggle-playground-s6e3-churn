@@ -64,6 +64,22 @@ Fecha: `2026-03-13`
     - `q80 + banda ambigua de v3`
   - mejor delta observado contra `v3`: `+8.28e-07`
   - no alcanza el gate operativo `1e-05`
+- `counterfactual teacher sensitivity` contra `v3`:
+  - senal: cuanto cae un subconjunto del teacher (`cb`, `r`, `rv`) bajo perturbaciones plausibles del mismo cliente
+  - contrafactuales probados:
+    - `auto_payment`
+    - `paperless_off`
+    - `contract_upgrade`
+    - `stability_bundle`
+  - mejor variante global:
+    - `stable_bundle_drop`
+    - `alpha = 0.05`
+    - `delta_vs_v3 = +5.879856e-06`
+  - variantes adicionales:
+    - banda `abs(v3-0.5) <= 0.20`: `+2.697875e-06`
+    - banda `abs(v3-0.5) <= 0.15`: `+3.279829e-06`
+  - mejora la macrofamilia dominante, pero no alcanza el gate global `1e-05`
+  - queda `NO-GO` para promocion
 
 ### Regularizacion Estructural
 
@@ -157,10 +173,13 @@ Antes de abrir una hipotesis nueva:
 
 La siguiente apuesta recomendada es:
 
-- `counterfactual teacher sensitivity features`
+- `source-aware joint training con Telco original`
 
 Razon:
 
-- agrega una senal que no existe hoy en `cb/xgb/lgb/r/rv`: la respuesta local del teacher ante perturbaciones plausibles del estado del cliente
-- no depende de otro mask local
-- puede evaluarse desde `smoke` contra `v3`
+- no reabre otra familia de modelo ni otro reranker local
+- usa una fuente supervisada externa real que ya sabemos es del mismo dominio
+- es materialmente distinta al `external telco transfer feature` que ya falló:
+  - no comprime la fuente externa a una sola prediccion
+  - incorpora filas etiquetadas adicionales con `dataset_source` y control de peso/origen
+- puede nacer comparada contra `v3` desde `smoke`

@@ -116,10 +116,14 @@ Lista exhaustiva y mantenida en:
 - La hipotesis de `external telco transfer feature` ya quedo cerrada como `NO-GO`.
 - La hipotesis de `uncertainty-band reranker` tambien queda cerrada como `NO-GO`.
 - La hipotesis de `hard-example stability score` tambien queda cerrada como `NO-GO`.
+- La hipotesis de `counterfactual teacher sensitivity` tambien queda cerrada como `NO-GO`.
+  - mejor delta global contra `v3`: `+5.879856e-06`
+  - bandas adicionales (`0.20`, `0.15`) quedaron en `+2.697875e-06` y `+3.279829e-06`
+  - mejora la macrofamilia dominante, pero no cruza el gate `1e-05`
 - La siguiente hipotesis recomendada ahora no es un modelo especifico, sino un filtro:
   - debe aportar senal materialmente nueva
   - debe explicitar por que `v3` no la absorbe ya
   - debe nacer comparada directamente contra `v3` desde `smoke`
 - La siguiente apuesta concreta recomendada es:
-  - `counterfactual teacher sensitivity features`
-  - idea base: medir como cambia el teacher cuando se perturban variables de negocio plausibles del mismo ejemplo
+  - `source-aware joint training con Telco original`
+  - idea base: incorporar filas etiquetadas del dataset Telco original con `dataset_source` y pesos de origen, en vez de reducir esa fuente externa a una sola prediccion auxiliar

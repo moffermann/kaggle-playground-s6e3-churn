@@ -31,7 +31,8 @@ Estado operativo actual:
 - La linea `external telco transfer feature` tambien quedo cerrada como `NO-GO`.
 - La linea `uncertainty-band reranker` tambien quedo cerrada como `NO-GO`.
 - La linea `hard-example stability score` tambien quedo cerrada como `NO-GO`.
+- La linea `counterfactual teacher sensitivity` tambien quedo cerrada como `NO-GO`.
 - Siguiente direccion recomendada:
   - no abrir otra linea sin pasar primero por el filtro documentado en `phase-reset-summary.md` y `model-family-ledger.md`
   - toda hipotesis nueva debe nacer comparada directamente contra `v3` desde `smoke`
-  - siguiente apuesta concreta recomendada: `counterfactual teacher sensitivity features`
+  - siguiente apuesta concreta recomendada: `source-aware joint training con Telco original`
