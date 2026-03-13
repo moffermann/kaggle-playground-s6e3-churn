@@ -139,5 +139,18 @@ Lista exhaustiva y mantenida en:
   - `cb_r = 0.9132509`
   - `cb_rv = 0.9138610`
   - ninguno mejora ni mezcla contra `v3`
+- La auditoria de `residual hierarchy ablation/compression` agrega una lectura nueva:
+  - la familia residual sigue siendo el nucleo real del edge de `v3`
+  - la mejor cadena comprimida quita `late_mtm_fiber`, pero igual pierde:
+    - `delta_vs_v3 = -3.5855e-07`
+    - `FAIL` por gate
+  - ranking de perdida marginal por quitar un paso:
+    - `late_mtm_fiber_paperless`
+    - `fiber_paperless_early`
+    - `early_all_internet`
+    - `late_mtm_fiber`
+  - lectura operativa:
+    - `late_mtm_fiber` es el paso de menor contribucion marginal
+    - pero la cadena completa sigue siendo el incumbent operativo; no conviene comprimirla como reemplazo
 - La siguiente apuesta concreta recomendada deja de ser esa linea.
   - toda hipotesis nueva debe volver a justificar explicitamente por que agrega senal no absorbida por `v3`

@@ -31,6 +31,7 @@ Esquema resumido, no exhaustivo:
 |       |-- ngram_xgb.py
 |       |-- modeling.py
 |       |-- pseudo_labeling.py
+|       |-- residual_ablation.py
 |       |-- specialist.py
 |       |-- submission_forensics.py
 |       |-- telco_transfer.py
@@ -44,6 +45,7 @@ Esquema resumido, no exhaustivo:
 |   |-- analyze_error_by_class.py
 |   |-- analyze_family_generalization.py
 |   |-- analyze_label_noise.py
+|   |-- analyze_residual_hierarchy_ablation.py
 |   |-- analyze_submission_forensics.py
 |   |-- analyze_v3_dominance.py
 |   |-- evaluate_against_v3.py
@@ -484,6 +486,41 @@ Notas:
   - metrics JSON comparables (`cv_std_auc` incluido)
   - veredicto del protocolo aplicado directamente contra `v3`
   - summary JSON con el resumen del veredicto y los paths generados
+
+3g4a. Auditar si la jerarquia residual `v3` es compresible
+
+```bash
+python scripts/analyze_residual_hierarchy_ablation.py \
+  --stage midcap \
+  --out-dir artifacts/reports/residual_ablation_v1
+```
+
+Notas:
+- Evalua todas las subsecuencias no vacias y estrictas de la cadena `v3` manteniendo el orden original de pasos.
+- Reutiliza `evaluate_candidate_chain_against_v3`, o sea:
+  - no reentrena modelos
+  - compara cada cadena comprimida directamente contra `v3`
+  - corre el gate con los mismos thresholds del protocolo
+- Flags utiles:
+  - `--train-csv`
+  - `--test-csv`
+  - `--stage`
+  - `--target-family-level`
+  - `--target-family-value`
+  - `--dominant-family-value`
+  - `--out-dir`
+- Salidas principales:
+  - `artifacts/reports/residual_ablation_v1/residual_ablation_summary.json`
+  - `artifacts/reports/residual_ablation_v1/residual_ablation_candidates.csv`
+  - ademas, por cada cadena candidata, deja `analysis_oof`, `metrics` y `validation_protocol_*`.
+- El resumen deja:
+  - mejor cadena comprimida
+  - ranking de ablation por paso individual
+  - ranking de ablation por pares
+  - thresholds de compresibilidad por tolerancia unilateral (`delta_vs_v3_oof_auc >= -tolerance`)
+- Uso recomendado:
+  - antes de abrir otra hipotesis sobre la familia residual
+  - para distinguir entre edge real de la cadena y complejidad accidental
 
 3g4b. Correr un `uncertainty-band reranker` local directamente contra `v3`
 

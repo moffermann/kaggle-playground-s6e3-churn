@@ -44,6 +44,15 @@ Fecha: `2026-03-13`
   - `feature`
   - `gated`
 - Reordenamiento de la jerarquia `v3` sin senal nueva.
+- `residual hierarchy ablation/compression`:
+  - mejor cadena comprimida:
+    - `early_all_internet -> fiber_paperless_early -> late_mtm_fiber_paperless`
+    - quita `late_mtm_fiber`
+    - `delta_vs_v3 = -3.5855e-07`
+    - `FAIL`
+  - conclusion:
+    - la cadena residual no es promocionable en una forma comprimida
+    - `late_mtm_fiber` tiene la menor contribucion marginal, pero no hay reemplazo del incumbent
 
 ### Rerankers Y Meta-Modelos
 
