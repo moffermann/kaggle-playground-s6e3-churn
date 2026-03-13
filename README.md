@@ -59,6 +59,7 @@ Esquema resumido, no exhaustivo:
 |   |-- experiment_pseudo_label_family.py
 |   |-- experiment_local_calibrator.py
 |   |-- experiment_specialist_model.py
+|   |-- experiment_telco_joint_training.py
 |   |-- build_teacher_component_frame.py
 |   |-- gate_submission_candidate.py
 |   |-- make_submission_residual_hierarchical.py
@@ -594,6 +595,34 @@ Notas:
   - `<label>_transfer_test.csv`
   - `validation_protocol_<label>_vs_v3_smoke.json`
 - El primer gate es siempre directo contra `v3`; no hay blend por default en esta linea.
+
+3g5c. Correr el smoke minimo `source-aware joint training` con Telco original
+
+```bash
+python scripts/experiment_telco_joint_training.py \
+  --train-csv data/raw/train.csv \
+  --test-csv data/raw/test.csv \
+  --original-csv artifacts/external/blastchar_telco/WA_Fn-UseC_-Telco-Customer-Churn.csv \
+  --feature-blocks R,V \
+  --external-weight 0.25 \
+  --label telco_joint_training_smoke
+```
+
+Notas:
+- Esta linea no proyecta un score externo; agrega filas reales del Telco original al fit de cada fold.
+- El OOF y el gate se calculan solo sobre filas de la competencia.
+- Agrega una categorica nueva:
+  - `dataset_source` con valores `competition` y `telco_original`
+- Las filas externas entran con peso configurable via `--external-weight`.
+- El script elimina filas del Telco original que coincidan exactamente con `train/test` antes del joint training.
+- El smoke nace comparado directamente contra `v3`; no se promueve si falla `validation_protocol_*_vs_v3_smoke.json`.
+- Artefactos principales:
+  - `<label>_metrics.json`
+  - `<label>_oof.csv`
+  - `<label>_analysis_oof.csv`
+  - `<label>_candidate_metrics.json`
+  - `<label>_reference_v3_metrics.json`
+  - `validation_protocol_<label>_vs_v3_smoke.json`
 
 3g6. Correr el smoke minimo `GraphSAGE + ANN graph`
 

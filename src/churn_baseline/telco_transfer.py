@@ -21,6 +21,9 @@ from .pipeline import _build_stratify_labels, _prepare_train_matrix, _transform_
 DEFAULT_ORIGINAL_CSV = "artifacts/external/blastchar_telco/WA_Fn-UseC_-Telco-Customer-Churn.csv"
 EXTERNAL_ID_COLUMN = "customerID"
 TRANSFER_FEATURE_COLUMN = "external_telco_pred"
+DATA_SOURCE_COLUMN = "dataset_source"
+COMPETITION_SOURCE_VALUE = "competition"
+TELCO_SOURCE_VALUE = "telco_original"
 
 
 def _sanitize_total_charges(frame: pd.DataFrame, *, fallback_median: float | None = None) -> pd.DataFrame:
@@ -181,6 +184,175 @@ def _build_external_prediction_feature(
         }
     )
     return transfer_train, transfer_test
+
+
+def _prepare_joint_source_frames(
+    competition_train_df: pd.DataFrame,
+    external_df: pd.DataFrame,
+    *,
+    stateless_blocks: Sequence[str],
+) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
+    x_competition, y_competition = prepare_train_features(
+        competition_train_df,
+        drop_id=True,
+        feature_blocks=stateless_blocks,
+    )
+    x_external, y_external = prepare_train_features(
+        external_df,
+        drop_id=True,
+        feature_blocks=stateless_blocks,
+    )
+    x_competition = x_competition.copy()
+    x_external = x_external.copy()
+    x_competition[DATA_SOURCE_COLUMN] = COMPETITION_SOURCE_VALUE
+    x_external[DATA_SOURCE_COLUMN] = TELCO_SOURCE_VALUE
+
+    expected_columns = list(x_competition.columns)
+    missing_external = sorted(set(expected_columns).difference(x_external.columns))
+    extra_external = sorted(set(x_external.columns).difference(expected_columns))
+    if missing_external or extra_external:
+        raise ValueError(
+            "Competition and external feature matrices are not column-compatible for joint training: "
+            f"missing_external={missing_external}, extra_external={extra_external}"
+        )
+    x_external = x_external.reindex(columns=expected_columns)
+    return x_competition, y_competition, x_external, y_external
+
+
+def run_telco_joint_training_smoke(
+    *,
+    train_csv_path: str,
+    test_csv_path: str,
+    original_csv_path: str,
+    challenger_params: CatBoostHyperParams,
+    feature_blocks: Sequence[str],
+    folds: int,
+    seed: int,
+    stratify_mode: str,
+    external_weight: float,
+    challenger_early_stopping_rounds: int,
+    verbose: int,
+) -> dict[str, Any]:
+    """Run source-aware joint training with external Telco rows and OOF on competition rows only."""
+    if float(external_weight) <= 0.0:
+        raise ValueError("external_weight must be > 0.")
+
+    competition_train_df = load_csv(train_csv_path)
+    competition_test_df = load_csv(test_csv_path)
+    original_df = _prepare_external_original_frame(original_csv_path)
+    original_filtered_df, dropped_overlaps = _drop_exact_external_overlaps(
+        original_df,
+        competition_train_df=competition_train_df,
+        competition_test_df=competition_test_df,
+    )
+    if original_filtered_df.empty:
+        raise ValueError("External Telco dataset is empty after dropping exact overlaps with competition train/test.")
+
+    normalized_blocks, stateless_blocks, stateful_blocks, _, _ = _prepare_train_matrix(
+        competition_train_df,
+        feature_blocks,
+    )
+    x_competition, y_competition, x_external, y_external = _prepare_joint_source_frames(
+        competition_train_df,
+        original_filtered_df,
+        stateless_blocks=stateless_blocks,
+    )
+
+    splitter = StratifiedKFold(n_splits=int(folds), shuffle=True, random_state=int(seed))
+    stratify_labels = _build_stratify_labels(
+        x_competition,
+        y_competition,
+        stratify_mode=stratify_mode,
+        min_count=int(folds),
+    )
+    oof_pred = pd.Series(index=x_competition.index, dtype="float64", name="oof_pred")
+    fold_metrics: list[dict[str, Any]] = []
+
+    for fold_number, (train_idx, valid_idx) in enumerate(splitter.split(x_competition, stratify_labels), start=1):
+        x_train_comp = x_competition.iloc[train_idx]
+        y_train_comp = y_competition.iloc[train_idx]
+        x_valid = x_competition.iloc[valid_idx]
+        y_valid = y_competition.iloc[valid_idx]
+
+        x_train_joint = pd.concat([x_train_comp, x_external], axis=0, ignore_index=True)
+        y_train_joint = pd.concat([y_train_comp, y_external], axis=0, ignore_index=True)
+        sample_weight_joint = pd.Series(1.0, index=x_train_joint.index, dtype="float64")
+        sample_weight_joint.iloc[len(x_train_comp) :] = float(external_weight)
+
+        x_train_fit, x_valid_fit = _transform_pair_with_stateful_blocks(x_train_joint, x_valid, stateful_blocks)
+        cat_columns = infer_categorical_columns(x_train_fit)
+        fold_params = CatBoostHyperParams(
+            iterations=challenger_params.iterations,
+            learning_rate=challenger_params.learning_rate,
+            depth=challenger_params.depth,
+            l2_leaf_reg=challenger_params.l2_leaf_reg,
+            random_seed=seed,
+            loss_function=challenger_params.loss_function,
+            eval_metric=challenger_params.eval_metric,
+            monotone_constraints=challenger_params.monotone_constraints,
+        )
+        model = fit_with_validation(
+            x_train=x_train_fit,
+            y_train=y_train_joint,
+            x_valid=x_valid_fit,
+            y_valid=y_valid,
+            cat_columns=cat_columns,
+            params=fold_params,
+            early_stopping_rounds=challenger_early_stopping_rounds,
+            verbose=verbose,
+            sample_weight_train=sample_weight_joint.loc[x_train_fit.index],
+        )
+        fold_pred = predict_proba(model, x_valid_fit)
+        oof_pred.iloc[valid_idx] = fold_pred.values
+        fold_metrics.append(
+            {
+                "fold": int(fold_number),
+                "auc": float(binary_auc(y_valid, fold_pred)),
+                "best_iteration": int(model.get_best_iteration()),
+                "final_iterations": int(best_iteration_or_default(model, challenger_params.iterations)),
+                "competition_train_rows": int(len(x_train_comp)),
+                "external_train_rows": int(len(x_external)),
+                "valid_rows": int(len(valid_idx)),
+                "external_weight": float(external_weight),
+            }
+        )
+
+    if oof_pred.isna().any():
+        raise RuntimeError("Telco joint-training OOF predictions contain missing values.")
+
+    fold_aucs = [float(item["auc"]) for item in fold_metrics]
+    return {
+        "generated_at_utc": utc_now_iso(),
+        "train_csv_path": str(train_csv_path),
+        "test_csv_path": str(test_csv_path),
+        "original_csv_path": str(original_csv_path),
+        "input_files": {
+            "train_csv": describe_file(train_csv_path),
+            "test_csv": describe_file(test_csv_path),
+            "original_csv": describe_file(original_csv_path),
+        },
+        "feature_blocks": list(normalized_blocks),
+        "joint_source_column": DATA_SOURCE_COLUMN,
+        "joint_source_values": {
+            "competition": COMPETITION_SOURCE_VALUE,
+            "external": TELCO_SOURCE_VALUE,
+        },
+        "external_weight": float(external_weight),
+        "teacher_metadata": {
+            "rows_original": int(len(original_df)),
+            "rows_after_overlap_filter": int(len(original_filtered_df)),
+            "dropped_exact_overlaps": int(dropped_overlaps),
+        },
+        "rows": int(len(competition_train_df)),
+        "external_rows": int(len(original_filtered_df)),
+        "folds": int(folds),
+        "seed": int(seed),
+        "cv_mean_auc": float(np.mean(fold_aucs)),
+        "cv_std_auc": float(np.std(fold_aucs)),
+        "oof_auc": float(binary_auc(y_competition, oof_pred)),
+        "fold_metrics": fold_metrics,
+        "oof_pred": oof_pred,
+    }
 
 
 def run_telco_transfer_smoke(

@@ -119,6 +119,7 @@ Fecha: `2026-03-13`
 - `bi/tri-gram TE + XGBoost`
 - `GNN starter + ANN graph`
 - `external telco transfer feature`
+- `source-aware joint training con Telco original`
 
 ## Regla Para No Reabrir Una Familia Cerrada
 
@@ -171,15 +172,21 @@ Antes de abrir una hipotesis nueva:
    - como pasaria el gate directo contra `v3`
 2. descartar desde el diseno cualquier idea cuyo mejor caso razonable siga estando en el orden de `1e-06`
 
-La siguiente apuesta recomendada es:
+La hipotesis de `source-aware joint training con Telco original` tambien queda cerrada como `NO-GO`.
 
-- `source-aware joint training con Telco original`
+Resultado minimo:
 
-Razon:
+- `R,V + dataset_source + filas blastchar`
+- `external_weight = 0.25`
+- `candidate_oof_auc = 0.9137443511`
+- `delta_vs_v3 = -0.0031935925`
+- veredicto: `FAIL`
 
-- no reabre otra familia de modelo ni otro reranker local
-- usa una fuente supervisada externa real que ya sabemos es del mismo dominio
-- es materialmente distinta al `external telco transfer feature` que ya falló:
-  - no comprime la fuente externa a una sola prediccion
-  - incorpora filas etiquetadas adicionales con `dataset_source` y control de peso/origen
-- puede nacer comparada contra `v3` desde `smoke`
+Lectura:
+
+- la fuente externa sigue siendo util como referencia de dominio
+- pero esta formulacion minima no agrega una senal competitiva sobre `v3`
+
+La siguiente apuesta recomendada vuelve a ser un filtro, no un modelo concreto:
+
+- solo abrir una hipotesis nueva si explica explicitamente por que su senal no esta ya absorbida por `v3`

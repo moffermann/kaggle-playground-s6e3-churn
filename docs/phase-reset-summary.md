@@ -124,6 +124,10 @@ Lista exhaustiva y mantenida en:
   - debe aportar senal materialmente nueva
   - debe explicitar por que `v3` no la absorbe ya
   - debe nacer comparada directamente contra `v3` desde `smoke`
-- La siguiente apuesta concreta recomendada es:
-  - `source-aware joint training con Telco original`
-  - idea base: incorporar filas etiquetadas del dataset Telco original con `dataset_source` y pesos de origen, en vez de reducir esa fuente externa a una sola prediccion auxiliar
+- La hipotesis de `source-aware joint training con Telco original` tambien queda cerrada como `NO-GO`.
+  - formulacion minima: `R,V + dataset_source + filas blastchar`
+  - `external_weight = 0.25`
+  - `delta_vs_v3 = -0.0031935925`
+  - veredicto: `FAIL`
+- La siguiente apuesta concreta recomendada deja de ser esa linea.
+  - toda hipotesis nueva debe volver a justificar explicitamente por que agrega senal no absorbida por `v3`
