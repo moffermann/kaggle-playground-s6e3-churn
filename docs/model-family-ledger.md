@@ -223,3 +223,25 @@ La siguiente apuesta recomendada vuelve a ser un filtro, no un modelo concreto:
   - `pseudo_labeling`
 - Lectura operativa:
   - el historial publico refuerza que las mejoras durables vinieron de la familia residual, no de challengers standalone ni de lineas exploratorias aisladas
+
+## Residual Distillation
+
+- La linea `total residual distillation` queda cerrada como `NO-GO` para reemplazar al incumbent.
+- Resultado offline:
+  - `smoke`: `PASS`
+  - `midcap`: `PASS`
+  - mejor `delta_vs_v3_oof_auc = +5.1685966e-05`
+  - `best_alpha = 4.0`
+- Resultado de materializacion:
+  - flujo de submit implementado y validado con el mismo `train_csv_path` y la misma referencia base `rvblend`
+  - `submission gate`: `PASS`
+- Resultado Kaggle:
+  - submission `ref 50925374`
+  - archivo `playground-series-s6e3-residual_distillation_midcap.csv`
+  - `public score = 0.91414`
+  - delta vs incumbent `v3`: `-0.00007`
+  - traza local: `artifacts/reports/submission_result_residual_distillation_midcap.json`
+- Lectura operativa:
+  - es la primera linea nueva que pasa `smoke`, `midcap` y `submission gate` directamente contra `v3`
+  - aun asi pierde en leaderboard publico
+  - conclusion: el stack de validacion actual ya es bastante mejor, pero todavia no separa por completo `offline winner` de `public winner`

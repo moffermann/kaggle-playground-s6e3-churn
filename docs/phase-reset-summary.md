@@ -152,5 +152,15 @@ Lista exhaustiva y mantenida en:
   - lectura operativa:
     - `late_mtm_fiber` es el paso de menor contribucion marginal
     - pero la cadena completa sigue siendo el incumbent operativo; no conviene comprimirla como reemplazo
+- La linea `total residual distillation` agrega una leccion nueva:
+  - pasa `smoke` y `midcap` directamente contra `v3`
+  - mejor `delta_vs_v3_oof_auc = +5.1685966e-05`
+  - el flujo de submit tambien pasa `submission gate`
+  - pero la submission real `ref 50925374` queda en `0.91414`
+  - eso la deja `-0.00007` por debajo de `v3`
+  - traza local: `artifacts/reports/submission_result_residual_distillation_midcap.json`
+  - lectura operativa:
+    - la validacion actual filtra mucho mejor que antes
+    - pero todavia no alcanza para autorizar reemplazo del incumbent solo por pasar el gate offline
 - La siguiente apuesta concreta recomendada deja de ser esa linea.
   - toda hipotesis nueva debe volver a justificar explicitamente por que agrega senal no absorbida por `v3`

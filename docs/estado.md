@@ -36,6 +36,11 @@ Estado operativo actual:
 - `submission forensics` ya esta operativo y confirma que la familia con mejor supervivencia publica es `residual_hierarchy`.
 - El `clean-room baseline rebuild` ya confirmo que `v3` sigue muy por encima de `cb_raw`, `cb_r` y `cb_rv` reconstruidos desde cero.
 - La auditoria de `residual hierarchy ablation/compression` confirma que la familia residual sigue siendo el nucleo operativo de `v3`; la mejor compresion quita `late_mtm_fiber`, pero aun asi pierde y no pasa gate.
+- La linea `total residual distillation` ya quedo cerrada como `NO-GO` para reemplazo:
+  - pasa `smoke`, `midcap` y `submission gate` contra `v3`
+  - pero la submission real `ref 50925374` hizo `0.91414`
+  - queda `-0.00007` debajo del incumbent `v3`
+  - traza local: `artifacts/reports/submission_result_residual_distillation_midcap.json`
 - Siguiente direccion recomendada:
   - no abrir otra linea sin pasar primero por el filtro documentado en `phase-reset-summary.md` y `model-family-ledger.md`
   - toda hipotesis nueva debe nacer comparada directamente contra `v3` desde `smoke`

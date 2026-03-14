@@ -12,7 +12,7 @@ from catboost import CatBoostRegressor
 from sklearn.model_selection import StratifiedKFold
 
 from .artifacts import ensure_parent_dir, write_json
-from .config import CatBoostHyperParams, ID_COLUMN
+from .config import CatBoostHyperParams, ID_COLUMN, TARGET_COLUMN
 from .data import infer_categorical_columns, load_csv
 from .diagnostics import OOF_TARGET_COLUMN
 from .evaluation import binary_auc
@@ -24,10 +24,18 @@ from .incumbent_v3 import (
     compute_repeated_cv_auc_stats,
     load_chain_step_frames,
 )
+from .feature_engineering import normalize_feature_blocks, partition_feature_blocks
 from .noise_audit import DOMINANT_MACROFAMILY
-from .pipeline import _prepare_train_matrix, _transform_pair_with_stateful_blocks, _transform_single_with_stateful_blocks
-from .specialist import _append_reference_features, _clip_probability
+from .pipeline import (
+    _prepare_test_matrix,
+    _prepare_train_matrix,
+    _transform_pair_with_stateful_blocks,
+    _transform_single_with_stateful_blocks,
+)
+from .specialist import _append_reference_features, _clip_probability, _load_reference_submission_frame
 from .validation_protocol import evaluate_validation_protocol
+
+DISTILLATION_BASE_REFERENCE_SUBMISSION_PATH = "artifacts/submissions/playground-series-s6e3-rvblend.csv"
 
 
 @dataclass(frozen=True)
@@ -298,6 +306,7 @@ def run_total_residual_distillation_smoke(
     summary = {
         "label": label,
         "train_csv_path": str(train_csv_path),
+        "expected_reference_submission_path": DISTILLATION_BASE_REFERENCE_SUBMISSION_PATH,
         "feature_blocks": list(config.feature_blocks),
         "alpha_grid": [float(alpha) for alpha in config.alpha_grid],
         "alpha_scan": alpha_scan_rows,
@@ -321,3 +330,110 @@ def run_total_residual_distillation_smoke(
     write_json(metrics_path, summary)
     summary["metrics_path"] = str(metrics_path)
     return summary
+
+
+def make_residual_distillation_submission(
+    *,
+    test_csv_path: str | Path,
+    train_csv_path: str | Path,
+    reference_submission_path: str | Path,
+    expected_reference_submission_path: str | Path | None,
+    model_path: str | Path,
+    feature_blocks: Sequence[str] | None,
+    alpha: float,
+    output_csv_path: str | Path,
+    report_json_path: str | Path,
+) -> dict[str, Any]:
+    """Materialize a submission by adding a distilled residual over a base teacher submission."""
+    normalized_blocks = normalize_feature_blocks(feature_blocks or ())
+    stateless_blocks, stateful_blocks = partition_feature_blocks(normalized_blocks)
+    alpha_value = float(alpha)
+    if expected_reference_submission_path is not None:
+        supplied_reference = Path(reference_submission_path).resolve()
+        expected_reference = Path(expected_reference_submission_path).resolve()
+        if supplied_reference != expected_reference:
+            raise ValueError(
+                "Residual distillation submit path requires the same base reference lineage used during training: "
+                f"expected '{expected_reference}', got '{supplied_reference}'."
+            )
+
+    test_df = load_csv(test_csv_path)
+    reference_frame = _load_reference_submission_frame(
+        test_df=test_df,
+        reference_submission_path=reference_submission_path,
+    )
+    reference_target_column = TARGET_COLUMN if TARGET_COLUMN in reference_frame.columns else "Churn"
+    if reference_target_column not in reference_frame.columns:
+        raise ValueError(
+            f"{reference_submission_path} must contain a prediction column compatible with '{TARGET_COLUMN}'."
+        )
+    x_test = _prepare_test_matrix(
+        test_df,
+        stateless_blocks=stateless_blocks,
+        stateful_blocks=stateful_blocks,
+        train_csv_path=train_csv_path,
+    )
+    base_reference = pd.Series(
+        reference_frame[reference_target_column].astype("float64").values,
+        index=x_test.index,
+        dtype="float64",
+        name="base_reference_pred",
+    )
+    x_test, _ = _append_reference_features(
+        x_test,
+        reference_pred=base_reference,
+        reference_component_frame=None,
+        include_logit=True,
+    )
+
+    model = CatBoostRegressor()
+    model.load_model(str(model_path))
+    expected_columns = list(getattr(model, "feature_names_", []))
+    if expected_columns:
+        missing = [column for column in expected_columns if column not in x_test.columns]
+        if missing:
+            raise ValueError(f"Missing inference columns for residual distillation model: {missing}")
+        x_test = x_test.loc[:, expected_columns]
+
+    distilled_delta = pd.Series(
+        model.predict(x_test),
+        index=x_test.index,
+        dtype="float64",
+        name="distilled_delta_pred",
+    )
+    candidate_pred = _clip_probability(base_reference + alpha_value * distilled_delta)
+
+    submission = pd.DataFrame(
+        {
+            ID_COLUMN: test_df[ID_COLUMN].values,
+            TARGET_COLUMN: candidate_pred.to_numpy(dtype="float64"),
+        }
+    )
+    output_path = ensure_parent_dir(output_csv_path)
+    submission.to_csv(output_path, index=False)
+
+    delta = candidate_pred - base_reference
+    report = {
+        "test_csv_path": str(test_csv_path),
+        "train_csv_path": str(train_csv_path),
+        "reference_submission_path": str(reference_submission_path),
+        "expected_reference_submission_path": (
+            str(expected_reference_submission_path) if expected_reference_submission_path is not None else None
+        ),
+        "model_path": str(model_path),
+        "feature_blocks": list(normalized_blocks),
+        "alpha": alpha_value,
+        "rows": int(len(submission)),
+        "mean_abs_shift_vs_base": float(delta.abs().mean()),
+        "max_abs_shift_vs_base": float(delta.abs().max()),
+        "mean_signed_shift_vs_base": float(delta.mean()),
+        "base_prediction_min": float(base_reference.min()),
+        "base_prediction_max": float(base_reference.max()),
+        "candidate_prediction_min": float(candidate_pred.min()),
+        "candidate_prediction_max": float(candidate_pred.max()),
+        "delta_prediction_min": float(distilled_delta.min()),
+        "delta_prediction_max": float(distilled_delta.max()),
+        "output_csv_path": str(output_path),
+    }
+    write_json(report_json_path, report)
+    return report

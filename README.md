@@ -556,6 +556,26 @@ Notas:
   - para usarlo despues tendrias que reconstruir `base_reference_pred` fuera de train
   - esa parte no se implemento en esta primera pasada
 
+Para materializar una submission con un modelo ya entrenado:
+
+```bash
+python scripts/experiment_residual_distillation.py \
+  --mode submit \
+  --label residual_distillation_midcap \
+  --metrics-json artifacts/reports/residual_distillation_midcap_metrics.json \
+  --reference-submission artifacts/submissions/playground-series-s6e3-rvblend.csv
+```
+
+Notas de inferencia:
+- `mode=submit` siempre usa un `metrics JSON`; puedes pasarlo explicito con `--metrics-json` o dejar que se resuelva por defecto como `artifacts/reports/<label>_metrics.json`.
+- Desde ese `metrics JSON` reutiliza por defecto `best_alpha`, `feature_blocks`, `model_path` y `train_csv_path`.
+- Puedes sobrescribir `--alpha` y `--model-path`, pero el contrato de `train_csv_path` y `reference-submission` sigue siendo el del entrenamiento original.
+- La referencia base en test debe ser exactamente la misma linea usada para entrenar el delta. En esta linea, eso significa `artifacts/submissions/playground-series-s6e3-rvblend.csv`.
+- El `reference-submission` debe ser un CSV de submission con columnas `id` y `Churn`, cobertura completa y alineacion por `id` respecto de `test.csv`.
+- Salidas principales:
+  - `artifacts/submissions/playground-series-s6e3-residual_distillation_midcap.csv`
+  - `artifacts/reports/submission_candidate_residual_distillation_midcap.json`
+
 3g4b. Correr un `uncertainty-band reranker` local directamente contra `v3`
 
 ```bash
