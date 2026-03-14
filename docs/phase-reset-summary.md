@@ -162,5 +162,6 @@ Lista exhaustiva y mantenida en:
   - lectura operativa:
     - la validacion actual filtra mucho mejor que antes
     - pero todavia no alcanza para autorizar reemplazo del incumbent solo por pasar el gate offline
+    - desde este caso, el `submission gate v2` agrega `submission_family_survival_prior` con evidencia historica de `submission_forensics`
 - La siguiente apuesta concreta recomendada deja de ser esa linea.
   - toda hipotesis nueva debe volver a justificar explicitamente por que agrega senal no absorbida por `v3`

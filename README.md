@@ -418,6 +418,10 @@ Notas:
   - `--reference-metrics-json`
 - Sin esos JSON el script igual corre, pero el check `midcap_cv_std` queda en `FAIL`.
 - Para `submission`, el gate exige `--submission-csv` para trazar el artefacto final.
+- Para `submission`, tambien corre `submission_family_survival_prior` usando por defecto `artifacts/reports/submission_forensics_summary.json`.
+- Si el nombre del archivo no mapea bien a una familia historica, puedes forzarla con `--submission-family`.
+- Si quieres usar otra evidencia historica, puedes sobrescribirla con `--submission-forensics-summary`.
+- Si esa evidencia historica falta, no se puede leer o viene incompleta, el check degrada a `WARN`; para una submission competitiva no conviene ignorar ese caso.
 
 3g3b. Diagnosticar por que `v3` domina challengers fallidos
 

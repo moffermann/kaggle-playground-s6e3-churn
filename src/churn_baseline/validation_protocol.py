@@ -51,6 +51,10 @@ MIN_LARGE_TEST_ROWS = 2000
 MIN_MICRO_TRAIN_ROWS = 1000
 MIN_MICRO_TEST_ROWS = 400
 TOP_DAMAGE_COUNT = 3
+DEFAULT_SUBMISSION_FORENSICS_SUMMARY_JSON = "artifacts/reports/submission_forensics_summary.json"
+MIN_PUBLIC_SURVIVAL_SUBMISSIONS = 2
+PUBLIC_SURVIVAL_SCORE_TOLERANCE = 1e-05
+MIN_NEW_FAMILY_SUBMISSION_DELTA_AUC = 7.5e-05
 
 
 def _logloss_vector(y_true: pd.Series, pred: pd.Series, epsilon: float = 1e-6) -> pd.Series:
@@ -135,6 +139,144 @@ def _derive_sister_family_value(
 def _relative_delta(candidate_value: float, reference_value: float, epsilon: float = 1e-12) -> float:
     denominator = max(abs(float(reference_value)), epsilon)
     return float((float(candidate_value) - float(reference_value)) / denominator)
+
+
+def _infer_submission_family(file_name: str) -> str:
+    name = str(file_name).lower()
+    if "residual-hier" in name:
+        return "residual_hierarchy"
+    if "residual-distillation" in name or "residual_distillation" in name:
+        return "residual_distillation"
+    if "rvblend" in name:
+        return "teacher_blend_rv"
+    if "rblend" in name:
+        return "teacher_blend_r"
+    if "blend-grid" in name:
+        return "blend_scan"
+    if "multiseed" in name:
+        return "catboost_multiseed"
+    if "pseudo" in name:
+        return "pseudo_labeling"
+    return "generic"
+
+
+def _load_submission_forensics_summary(summary_json_path: str | Path) -> dict[str, Any]:
+    payload = json.loads(Path(summary_json_path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"{summary_json_path} must contain a JSON object.")
+    return payload
+
+
+def _build_submission_survival_prior(
+    *,
+    summary_json_path: str | Path | None,
+    submission_csv_path: str | Path | None,
+    submission_family_override: str | None,
+    delta_auc: float,
+) -> dict[str, Any]:
+    if summary_json_path is None:
+        return {
+            "status": WARN_STATUS,
+            "reason": "missing_summary_path",
+            "min_public_survival_submissions": MIN_PUBLIC_SURVIVAL_SUBMISSIONS,
+            "public_survival_score_tolerance": PUBLIC_SURVIVAL_SCORE_TOLERANCE,
+            "min_new_family_submission_delta_auc": MIN_NEW_FAMILY_SUBMISSION_DELTA_AUC,
+        }
+    summary_path = Path(summary_json_path)
+    if not summary_path.exists():
+        return {
+            "status": WARN_STATUS,
+            "reason": "summary_not_found",
+            "summary_json_path": str(summary_path),
+            "min_public_survival_submissions": MIN_PUBLIC_SURVIVAL_SUBMISSIONS,
+            "public_survival_score_tolerance": PUBLIC_SURVIVAL_SCORE_TOLERANCE,
+            "min_new_family_submission_delta_auc": MIN_NEW_FAMILY_SUBMISSION_DELTA_AUC,
+        }
+    try:
+        summary = _load_submission_forensics_summary(summary_path)
+    except Exception as exc:
+        return {
+            "status": WARN_STATUS,
+            "reason": "summary_unreadable",
+            "summary_json_path": str(summary_path),
+            "error": str(exc),
+            "min_public_survival_submissions": MIN_PUBLIC_SURVIVAL_SUBMISSIONS,
+            "public_survival_score_tolerance": PUBLIC_SURVIVAL_SCORE_TOLERANCE,
+            "min_new_family_submission_delta_auc": MIN_NEW_FAMILY_SUBMISSION_DELTA_AUC,
+        }
+    best_public_submission = summary.get("best_public_submission")
+    incumbent_public_score = None
+    if isinstance(best_public_submission, dict):
+        raw_score = best_public_submission.get("public_score")
+        if raw_score is not None:
+            incumbent_public_score = float(raw_score)
+
+    submission_family = submission_family_override
+    if not submission_family and submission_csv_path is not None:
+        submission_family = _infer_submission_family(Path(submission_csv_path).name)
+
+    family_summary = summary.get("family_summary")
+    if incumbent_public_score is None or not isinstance(family_summary, list):
+        return {
+            "status": WARN_STATUS,
+            "reason": "summary_incomplete",
+            "summary_json_path": str(summary_path),
+            "submission_family": submission_family,
+            "incumbent_public_score": incumbent_public_score,
+            "has_family_summary": isinstance(family_summary, list),
+            "min_public_survival_submissions": MIN_PUBLIC_SURVIVAL_SUBMISSIONS,
+            "public_survival_score_tolerance": PUBLIC_SURVIVAL_SCORE_TOLERANCE,
+            "min_new_family_submission_delta_auc": MIN_NEW_FAMILY_SUBMISSION_DELTA_AUC,
+        }
+    matched_family = None
+    if submission_family:
+        for row in family_summary:
+            if isinstance(row, dict) and str(row.get("submission_family")) == str(submission_family):
+                matched_family = row
+                break
+
+    submissions = None
+    best_public_score = None
+    if isinstance(matched_family, dict):
+        if matched_family.get("submissions") is not None:
+            submissions = int(matched_family["submissions"])
+        if matched_family.get("best_public_score") is not None:
+            best_public_score = float(matched_family["best_public_score"])
+
+    historical_survivor = bool(
+        matched_family is not None
+        and incumbent_public_score is not None
+        and submissions is not None
+        and best_public_score is not None
+        and submissions >= MIN_PUBLIC_SURVIVAL_SUBMISSIONS
+        and best_public_score >= (incumbent_public_score - PUBLIC_SURVIVAL_SCORE_TOLERANCE)
+    )
+    strong_new_family = bool(delta_auc >= MIN_NEW_FAMILY_SUBMISSION_DELTA_AUC)
+
+    if historical_survivor:
+        status = PASS_STATUS
+        path = "historical_survivor"
+    elif strong_new_family:
+        status = PASS_STATUS
+        path = "strong_new_family_exception"
+    else:
+        status = FAIL_STATUS
+        path = "insufficient_public_survival_prior"
+
+    return {
+        "status": status,
+        "path": path,
+        "summary_json_path": str(summary_path),
+        "submission_family": submission_family,
+        "incumbent_public_score": incumbent_public_score,
+        "matched_family": matched_family,
+        "family_submissions": submissions,
+        "family_best_public_score": best_public_score,
+        "delta_oof_auc": float(delta_auc),
+        "min_public_survival_submissions": MIN_PUBLIC_SURVIVAL_SUBMISSIONS,
+        "public_survival_score_tolerance": PUBLIC_SURVIVAL_SCORE_TOLERANCE,
+        "min_new_family_submission_delta_auc": MIN_NEW_FAMILY_SUBMISSION_DELTA_AUC,
+    }
 
 
 def _summarize_family_candidate_metrics(
@@ -270,6 +412,8 @@ def evaluate_validation_protocol(
     candidate_metrics_json: str | Path | None = None,
     reference_metrics_json: str | Path | None = None,
     submission_csv_path: str | Path | None = None,
+    submission_forensics_summary_json: str | Path | None = DEFAULT_SUBMISSION_FORENSICS_SUMMARY_JSON,
+    submission_family_override: str | None = None,
     out_json_path: str | Path | None = None,
 ) -> dict[str, Any]:
     stage_value = str(stage).strip().lower()
@@ -534,6 +678,19 @@ def evaluate_validation_protocol(
             )
 
     if stage_value == SUBMISSION_STAGE:
+        survival_prior = _build_submission_survival_prior(
+            summary_json_path=submission_forensics_summary_json,
+            submission_csv_path=submission_csv_path,
+            submission_family_override=submission_family_override,
+            delta_auc=delta_auc,
+        )
+        checks.append(
+            make_check(
+                "submission_family_survival_prior",
+                survival_prior["status"],
+                survival_prior,
+            )
+        )
         checks.append(
             make_check(
                 "submission_trace_artifacts",
@@ -569,6 +726,7 @@ def evaluate_validation_protocol(
         "dominant_family": dominant_row,
         "target_family": target_family_row,
         "sister_family": sister_family_row,
+        "submission_survival_prior": survival_prior if stage_value == SUBMISSION_STAGE else None,
         "checks": checks,
         "verdict": verdict,
         "git_context": collect_git_context(),

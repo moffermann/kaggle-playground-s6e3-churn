@@ -41,6 +41,7 @@ Estado operativo actual:
   - pero la submission real `ref 50925374` hizo `0.91414`
   - queda `-0.00007` debajo del incumbent `v3`
   - traza local: `artifacts/reports/submission_result_residual_distillation_midcap.json`
+  - desde este caso, el `submission gate v2` ya incluye `submission_family_survival_prior`
 - Siguiente direccion recomendada:
   - no abrir otra linea sin pasar primero por el filtro documentado en `phase-reset-summary.md` y `model-family-ledger.md`
   - toda hipotesis nueva debe nacer comparada directamente contra `v3` desde `smoke`

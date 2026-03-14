@@ -245,3 +245,4 @@ La siguiente apuesta recomendada vuelve a ser un filtro, no un modelo concreto:
   - es la primera linea nueva que pasa `smoke`, `midcap` y `submission gate` directamente contra `v3`
   - aun asi pierde en leaderboard publico
   - conclusion: el stack de validacion actual ya es bastante mejor, pero todavia no separa por completo `offline winner` de `public winner`
+  - accion tomada: `submission gate v2` ahora agrega `submission_family_survival_prior`

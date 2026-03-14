@@ -111,6 +111,17 @@ Gate para subir:
 - excepcion 2: `senal materialmente nueva`
   - solo si la nueva linea tiene `OOF correlation <= 0.995` contra el incumbent comparable
   - o `standalone delta >= 2e-05` bajo Split A
+- y `submission_family_survival_prior`
+  - si la familia de submission ya tiene supervivencia publica probada, pasa por prior
+  - `supervivencia publica probada` significa:
+    - al menos `2` submissions historicas en esa familia
+    - y `best_public_score >= incumbent_public_score - 1e-05`
+  - si no la tiene, solo pasa como excepcion si el `delta local >= 7.5e-05`
+  - este check usa `artifacts/reports/submission_forensics_summary.json` como evidencia historica
+  - el CLI permite sobrescribir:
+    - `--submission-forensics-summary`
+    - `--submission-family`
+  - si la evidencia historica no esta disponible, no se puede leer o viene incompleta, el check degrada a `WARN`; no debe usarse para autorizar una submission competitiva sin revisar ese vacio
 
 ## Tipos De Split
 
@@ -204,6 +215,7 @@ Pass minimo:
    - OOF CSV si existe
    - submission CSV
    - commit SHA o branch origen
+8. La familia de submission pasa el prior historico o la excepcion de familia nueva fuerte
 
 Si alguno falla:
 - no subir

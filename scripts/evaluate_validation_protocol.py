@@ -13,7 +13,13 @@ add_src_to_path()
 from churn_baseline.config import ID_COLUMN
 from churn_baseline.diagnostics import DEFAULT_REFERENCE_OOF_SPECS
 from churn_baseline.diagnostics import OOF_TARGET_COLUMN
-from churn_baseline.validation_protocol import DOMINANT_MACROFAMILY, SUPPORTED_STAGES, SUPPORTED_TARGET_LEVELS, evaluate_validation_protocol
+from churn_baseline.validation_protocol import (
+    DEFAULT_SUBMISSION_FORENSICS_SUMMARY_JSON,
+    DOMINANT_MACROFAMILY,
+    SUPPORTED_STAGES,
+    SUPPORTED_TARGET_LEVELS,
+    evaluate_validation_protocol,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -67,6 +73,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reference-metrics-json", default="", help="Optional reference metrics JSON, used for midcap/submission cv_std checks.")
     parser.add_argument("--submission-csv", default="", help="Optional submission CSV path, required for submission-stage artifact trace checks.")
     parser.add_argument(
+        "--submission-forensics-summary",
+        default=DEFAULT_SUBMISSION_FORENSICS_SUMMARY_JSON,
+        help="Submission forensics summary JSON used by the submission-stage public-survival prior.",
+    )
+    parser.add_argument(
+        "--submission-family",
+        default="",
+        help="Optional submission_family override for the submission-stage public-survival prior.",
+    )
+    parser.add_argument(
         "--out-json",
         default="artifacts/reports/validation_protocol_verdict.json",
         help="Output JSON verdict path.",
@@ -93,6 +109,8 @@ def main() -> int:
         candidate_metrics_json=args.candidate_metrics_json.strip() or None,
         reference_metrics_json=args.reference_metrics_json.strip() or None,
         submission_csv_path=args.submission_csv.strip() or None,
+        submission_forensics_summary_json=args.submission_forensics_summary.strip() or None,
+        submission_family_override=args.submission_family.strip() or None,
         out_json_path=args.out_json,
     )
     print(json.dumps(result, indent=2))
