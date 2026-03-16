@@ -481,15 +481,18 @@ Notas:
   - los mismos `id`
   - el mismo `oof_target`
   - el mismo `reference_pred` base dentro de una tolerancia numérica pequeña
-- Si sobrescribes un paso existente de `v3`, el challenger cambia, pero la referencia `v3` sigue usando los OOF fijos originales.
+- Si sobrescribes un paso existente del incumbent elegido, el challenger cambia, pero la referencia sigue usando los OOF fijos originales de ese incumbent.
 - La union de `id` en los OOF debe cubrir exactamente `train.csv`; el script falla si detecta cobertura parcial.
 - El script deja:
-  - OOF de referencia `v3`
+  - OOF de referencia del incumbent (`v3` o `v6`)
   - OOF del challenger
-  - analysis OOF `candidate vs v3`
+  - analysis OOF `candidate vs incumbent`
   - metrics JSON comparables (`cv_std_auc` incluido)
-  - veredicto del protocolo aplicado directamente contra `v3`
+  - veredicto del protocolo aplicado directamente contra el incumbent elegido
   - summary JSON con el resumen del veredicto y los paths generados
+- Incumbents soportados:
+  - `v3`: `early_all_internet -> fiber_paperless_early -> late_mtm_fiber -> late_mtm_fiber_paperless`
+  - `v6`: `early_all_internet -> fiber_paperless_early -> late_mtm_fiber_paperless`
 
 3g4a. Auditar si la jerarquia residual `v3` es compresible
 

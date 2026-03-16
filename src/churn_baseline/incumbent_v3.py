@@ -1,4 +1,4 @@
-"""Helpers to compare challenger residual chains directly against incumbent v3."""
+"""Helpers to compare challenger residual chains against tracked incumbents."""
 
 from __future__ import annotations
 
@@ -23,6 +23,17 @@ V3_ORDER: tuple[str, ...] = (
     "late_mtm_fiber_paperless",
 )
 
+V6_ORDER: tuple[str, ...] = (
+    "early_all_internet",
+    "fiber_paperless_early",
+    "late_mtm_fiber_paperless",
+)
+
+INCUMBENT_CHAIN_ORDERS: dict[str, tuple[str, ...]] = {
+    "v3": V3_ORDER,
+    "v6": V6_ORDER,
+}
+
 V3_STEP_OOF_PATHS: dict[str, str] = {
     "early_all_internet": "artifacts/reports/residual_reranker_early_all_internet_midcap_oof.csv",
     "fiber_paperless_early": "artifacts/reports/residual_reranker_fiber_paperless_early_teacher_midcap_oof.csv",
@@ -38,6 +49,17 @@ _STEP_REQUIRED_COLUMNS = {
     "reference_pred",
 }
 _REFERENCE_ATOL = 1e-8
+
+
+def normalize_incumbent_label(incumbent: str) -> str:
+    label = str(incumbent).strip().lower()
+    if label not in INCUMBENT_CHAIN_ORDERS:
+        raise ValueError(f"Unsupported incumbent '{incumbent}'. Available: {sorted(INCUMBENT_CHAIN_ORDERS)}")
+    return label
+
+
+def get_incumbent_order(incumbent: str) -> tuple[str, ...]:
+    return INCUMBENT_CHAIN_ORDERS[normalize_incumbent_label(incumbent)]
 
 
 def _load_step_oof_frame(path: str | Path) -> pd.DataFrame:
@@ -236,10 +258,42 @@ def evaluate_candidate_chain_against_v3(
     out_dir: str | Path = "artifacts/reports",
 ) -> dict[str, Any]:
     """Compare a challenger residual chain directly against incumbent v3."""
+    return evaluate_candidate_chain_against_incumbent(
+        incumbent="v3",
+        candidate_order=candidate_order,
+        candidate_step_oof_paths=candidate_step_oof_paths,
+        stage=stage,
+        train_csv_path=train_csv_path,
+        test_csv_path=test_csv_path,
+        target_family_level=target_family_level,
+        target_family_value=target_family_value,
+        dominant_family_value=dominant_family_value,
+        label=label,
+        out_dir=out_dir,
+    )
+
+
+def evaluate_candidate_chain_against_incumbent(
+    *,
+    incumbent: str,
+    candidate_order: Sequence[str],
+    candidate_step_oof_paths: Mapping[str, str | Path] | None = None,
+    stage: str = "smoke",
+    train_csv_path: str | Path = "data/raw/train.csv",
+    test_csv_path: str | Path = "data/raw/test.csv",
+    target_family_level: str = "segment3",
+    target_family_value: str = DOMINANT_MACROFAMILY,
+    dominant_family_value: str = DOMINANT_MACROFAMILY,
+    label: str = "candidate",
+    out_dir: str | Path = "artifacts/reports",
+) -> dict[str, Any]:
+    """Compare a challenger residual chain directly against a tracked incumbent."""
     if str(stage).strip().lower() not in SUPPORTED_STAGES:
         raise ValueError(f"Unsupported stage '{stage}'. Supported: {SUPPORTED_STAGES}")
     if not candidate_order:
         raise ValueError("candidate_order must contain at least one step name")
+    incumbent_label = normalize_incumbent_label(incumbent)
+    incumbent_order = get_incumbent_order(incumbent_label)
 
     out_root = Path(out_dir)
     reference_step_frames = load_chain_step_frames()
@@ -252,15 +306,15 @@ def evaluate_candidate_chain_against_v3(
     ids = pd.Series(target.index.to_numpy(), index=target.index, dtype="int64", name=ID_COLUMN)
     _validate_full_train_coverage(ids, train_csv_path=train_csv_path)
 
-    v3_pred = build_chain_prediction(V3_ORDER, reference_step_frames)
+    incumbent_pred = build_chain_prediction(incumbent_order, reference_step_frames)
     candidate_pred = build_chain_prediction(candidate_order, candidate_step_frames)
-    delta_auc = float(binary_auc(target, candidate_pred) - binary_auc(target, v3_pred))
+    delta_auc = float(binary_auc(target, candidate_pred) - binary_auc(target, incumbent_pred))
 
-    v3_frame = pd.DataFrame(
+    incumbent_frame = pd.DataFrame(
         {
             ID_COLUMN: ids.values,
             OOF_TARGET_COLUMN: target.values,
-            "candidate_pred": v3_pred.values,
+            "candidate_pred": incumbent_pred.values,
         }
     )
     candidate_frame = pd.DataFrame(
@@ -275,34 +329,36 @@ def evaluate_candidate_chain_against_v3(
         {
             ID_COLUMN: ids.values,
             OOF_TARGET_COLUMN: target.values,
-            "reference_pred": v3_pred.values,
+            "reference_pred": incumbent_pred.values,
             "candidate_pred": candidate_pred.values,
         }
     )
 
-    v3_oof_path = ensure_parent_dir(out_root / "validation_protocol_v3_chain_oof.csv")
+    incumbent_oof_path = ensure_parent_dir(out_root / f"validation_protocol_{incumbent_label}_chain_oof.csv")
     candidate_oof_path = ensure_parent_dir(out_root / f"validation_protocol_{label}_chain_oof.csv")
-    analysis_oof_path = ensure_parent_dir(out_root / f"validation_protocol_{label}_vs_v3_analysis_oof.csv")
-    v3_frame.to_csv(v3_oof_path, index=False)
+    analysis_oof_path = ensure_parent_dir(
+        out_root / f"validation_protocol_{label}_vs_{incumbent_label}_analysis_oof.csv"
+    )
+    incumbent_frame.to_csv(incumbent_oof_path, index=False)
     candidate_frame.to_csv(candidate_oof_path, index=False)
     analysis_frame.to_csv(analysis_oof_path, index=False)
 
     reference_metrics = {
-        "generated_for": "validation_protocol_v3_chain_reference",
-        "order": list(V3_ORDER),
-        **compute_repeated_cv_auc_stats(target, v3_pred),
+        "generated_for": f"validation_protocol_{incumbent_label}_chain_reference",
+        "order": list(incumbent_order),
+        **compute_repeated_cv_auc_stats(target, incumbent_pred),
     }
     candidate_metrics = {
         "generated_for": "validation_protocol_chain_candidate",
         "order": [str(step) for step in candidate_order],
         **compute_repeated_cv_auc_stats(target, candidate_pred),
     }
-    reference_metrics_path = ensure_parent_dir(out_root / "validation_protocol_v3_chain_metrics.json")
+    reference_metrics_path = ensure_parent_dir(out_root / f"validation_protocol_{incumbent_label}_chain_metrics.json")
     candidate_metrics_path = ensure_parent_dir(out_root / f"validation_protocol_{label}_chain_metrics.json")
     write_json(reference_metrics_path, reference_metrics)
     write_json(candidate_metrics_path, candidate_metrics)
 
-    verdict_path = ensure_parent_dir(out_root / f"validation_protocol_{label}_vs_v3_{stage}.json")
+    verdict_path = ensure_parent_dir(out_root / f"validation_protocol_{label}_vs_{incumbent_label}_{stage}.json")
     protocol_result = evaluate_validation_protocol(
         train_csv_path=train_csv_path,
         test_csv_path=test_csv_path,
@@ -319,10 +375,12 @@ def evaluate_candidate_chain_against_v3(
     summary = {
         "label": str(label),
         "stage": str(stage),
+        "incumbent_label": incumbent_label,
         "candidate_order": [str(step) for step in candidate_order],
-        "v3_order": list(V3_ORDER),
-        "delta_vs_v3_oof_auc": delta_auc,
-        "v3_oof_path": str(v3_oof_path),
+        "incumbent_order": list(incumbent_order),
+        f"{incumbent_label}_order": list(incumbent_order),
+        f"delta_vs_{incumbent_label}_oof_auc": delta_auc,
+        "incumbent_oof_path": str(incumbent_oof_path),
         "candidate_oof_path": str(candidate_oof_path),
         "analysis_oof_path": str(analysis_oof_path),
         "reference_metrics_path": str(reference_metrics_path),
@@ -331,7 +389,7 @@ def evaluate_candidate_chain_against_v3(
         "verdict": protocol_result["verdict"],
         "overall_metrics": protocol_result["overall_metrics"],
     }
-    summary_path = ensure_parent_dir(out_root / f"validation_protocol_{label}_vs_v3_summary.json")
+    summary_path = ensure_parent_dir(out_root / f"validation_protocol_{label}_vs_{incumbent_label}_summary.json")
     write_json(summary_path, summary)
     summary["summary_path"] = str(summary_path)
     return summary

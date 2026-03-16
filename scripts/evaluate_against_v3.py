@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate a residual-chain challenger directly against incumbent v3."""
+"""Evaluate a residual-chain challenger directly against a tracked incumbent."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from _bootstrap import add_src_to_path
 
 add_src_to_path()
 
-from churn_baseline.incumbent_v3 import evaluate_candidate_chain_against_v3
+from churn_baseline.incumbent_v3 import evaluate_candidate_chain_against_incumbent
 from churn_baseline.validation_protocol import DOMINANT_MACROFAMILY, SUPPORTED_STAGES
 
 
@@ -23,8 +23,9 @@ def _parse_candidate_step(raw: str) -> tuple[str, str]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate a residual-chain challenger directly against incumbent v3"
+        description="Evaluate a residual-chain challenger directly against a tracked incumbent"
     )
+    parser.add_argument("--incumbent", choices=["v3", "v6"], default="v3")
     parser.add_argument("--stage", choices=SUPPORTED_STAGES, default="smoke")
     parser.add_argument("--train-csv", default="data/raw/train.csv")
     parser.add_argument("--test-csv", default="data/raw/test.csv")
@@ -63,7 +64,8 @@ def main() -> int:
     args = parse_args()
     candidate_order = [token.strip() for token in args.candidate_order.split(",") if token.strip()]
     candidate_step_oof_paths = dict(_parse_candidate_step(raw) for raw in args.candidate_step)
-    summary = evaluate_candidate_chain_against_v3(
+    summary = evaluate_candidate_chain_against_incumbent(
+        incumbent=args.incumbent,
         candidate_order=candidate_order,
         candidate_step_oof_paths=candidate_step_oof_paths,
         stage=args.stage,
