@@ -1,7 +1,7 @@
 # Estado del proyecto
 
 Fecha de inicializacion: `2026-03-04`
-Ultima actualizacion: `2026-03-13`
+Ultima actualizacion: `2026-03-16`
 
 Estado operativo actual:
 - resumen ejecutivo: [phase-reset-summary.md](./phase-reset-summary.md)
@@ -27,6 +27,12 @@ Estado operativo actual:
   - `v3`
   - Kaggle `ref 50828079`
   - `public score = 0.91421`
+- Working base vigente para iteracion:
+  - `v6`
+  - archivo `playground-series-s6e3-residual-hier-v6-compressed.csv`
+  - Kaggle `ref 50974098`
+  - `public score = 0.91421`
+  - lectura: misma performance publica que `v3` con una cadena residual mas simple
 - La linea data-centric de `label noise / near-duplicates` quedo cerrada como `NO-GO` para mitigacion directa.
 - La linea `external telco transfer feature` tambien quedo cerrada como `NO-GO`.
 - La linea `source-aware joint training con Telco original` tambien quedo cerrada como `NO-GO`.
@@ -36,6 +42,10 @@ Estado operativo actual:
 - `submission forensics` ya esta operativo y confirma que la familia con mejor supervivencia publica es `residual_hierarchy`.
 - El `clean-room baseline rebuild` ya confirmo que `v3` sigue muy por encima de `cb_raw`, `cb_r` y `cb_rv` reconstruidos desde cero.
 - La auditoria de `residual hierarchy ablation/compression` confirma que la familia residual sigue siendo el nucleo operativo de `v3`; la mejor compresion quita `late_mtm_fiber`, pero aun asi pierde y no pasa gate.
+- Las submissions del `2026-03-16` ajustan esa decision:
+  - `v6` y `v10` empatan el mejor publico `0.91421`
+  - `v8` y `v9` empeoran
+  - por eso se mantiene `v3` como incumbent publico, pero `v6` queda fijada como base de trabajo
 - La linea `total residual distillation` ya quedo cerrada como `NO-GO` para reemplazo:
   - pasa `smoke`, `midcap` y `submission gate` contra `v3`
   - pero la submission real `ref 50925374` hizo `0.91414`

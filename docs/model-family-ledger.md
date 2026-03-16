@@ -1,12 +1,16 @@
 # Model Family Ledger
 
-Fecha: `2026-03-13`
+Fecha: `2026-03-16`
 
 ## Incumbent
 
 - Submission operativa vigente: `v3`
 - Kaggle `ref`: `50828079`
 - `public score`: `0.91421`
+- Working base para nuevas iteraciones: `v6`
+  - `playground-series-s6e3-residual-hier-v6-compressed.csv`
+  - Kaggle `ref 50974098`
+  - `public score = 0.91421`
 - Gate operativo: no promover ni subir candidatos con `delta local < 1e-05 en OOF AUC` contra `v3`, salvo fix de paridad o senal materialmente nueva.
 - Referencias de terminologia:
   - `R` y `RV`: ver [README.md](../README.md)
@@ -53,6 +57,13 @@ Fecha: `2026-03-13`
   - conclusion:
     - la cadena residual no es promocionable en una forma comprimida
     - `late_mtm_fiber` tiene la menor contribucion marginal, pero no hay reemplazo del incumbent
+  - ajuste despues de submissions reales del `2026-03-16`:
+    - `v6` (3 pasos) empata el mejor publico
+    - `v10` (2 pasos) tambien empata el mejor publico
+    - las variantes con `early_g` empeoran
+    - decision:
+      - `v3` sigue siendo el incumbent publico
+      - `v6` pasa a ser la working base mas razonable por simplicidad y cercania a `v3`
 
 ### Rerankers Y Meta-Modelos
 

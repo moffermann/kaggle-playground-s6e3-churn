@@ -1,13 +1,18 @@
 # Resumen De Reset De Fase
 
 Fecha: `2026-03-11`
-Ultima actualizacion: `2026-03-13`
+Ultima actualizacion: `2026-03-16`
 
 ## Incumbent
 
 - Submission operativa vigente: `v3`
 - Kaggle `ref`: `50828079`
 - `public score`: `0.91421`
+- Working base recomendada para la siguiente fase: `v6`
+  - archivo: `playground-series-s6e3-residual-hier-v6-compressed.csv`
+  - Kaggle `ref`: `50974098`
+  - `public score`: `0.91421`
+  - criterio: empata al incumbent publico con una cadena mas simple
 - Regla base: no reemplazar `v3` con candidatos cuyo `delta local` en `OOF AUC` contra el incumbent sea `< 1e-05`, salvo fix de paridad o senal materialmente nueva.
 - Terminologia corta:
   - `R` y `RV`: ver [README.md](../README.md)
@@ -152,6 +157,13 @@ Lista exhaustiva y mantenida en:
   - lectura operativa:
     - `late_mtm_fiber` es el paso de menor contribucion marginal
     - pero la cadena completa sigue siendo el incumbent operativo; no conviene comprimirla como reemplazo
+ - Las submissions del `2026-03-16` endurecen esa lectura:
+   - `v6` (`early_all_internet -> fiber_paperless_early -> late_mtm_fiber_paperless`) empata `0.91421`
+   - `v10` (`fiber_paperless_early -> late_mtm_fiber_paperless`) tambien empata `0.91421`
+   - `v8` y `v9`, que reintroducen variantes `early_g`, empeoran a `0.91418` y `0.91420`
+   - decision operativa:
+     - `v3` se mantiene como incumbent publico
+     - `v6` pasa a ser la mejor base de trabajo por simplicidad y cercania a `v3`
 - La linea `total residual distillation` agrega una leccion nueva:
   - pasa `smoke` y `midcap` directamente contra `v3`
   - mejor `delta_vs_v3_oof_auc = +5.1685966e-05`
